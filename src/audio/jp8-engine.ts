@@ -1,5 +1,6 @@
 /**
- * JP-8 Engine — Main thread facade.
+ * JP-8 Engine — Single synth instance.
+ * Can own its AudioContext or use an external one (for rack mode).
  * SAB for params (40 × f32), postMessage for notes.
  */
 
@@ -7,7 +8,7 @@ import { loadJP8Wasm } from './wasm-loader';
 
 export type JP8EngineStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-const PARAM_COUNT = 40;
+export const PARAM_COUNT = 40;
 const TELEMETRY_SAB_BYTES = 16;
 const SAB_ACTIVE_VOICES = 0;
 
@@ -15,6 +16,7 @@ type StatusCallback = (status: JP8EngineStatus) => void;
 
 export class JP8Engine {
   private audioCtx: AudioContext | null = null;
+  private ownsContext = false; // true if we created the context ourselves
   private workletNode: AudioWorkletNode | null = null;
   private paramSab: SharedArrayBuffer | null = null;
   private paramView: Float32Array | null = null;
@@ -28,18 +30,30 @@ export class JP8Engine {
   getStatus() { return this.status; }
   private setStatus(s: JP8EngineStatus) { this.status = s; this.onStatusChange?.(s); }
 
-  async start(): Promise<void> {
+  /**
+   * Start the engine. If externalCtx is provided, uses it instead of
+   * creating a new AudioContext (for rack mode where multiple engines
+   * share one context or each gets their own).
+   */
+  async start(externalCtx?: AudioContext): Promise<void> {
     if (this.status === 'ready') return;
     if (this.initPromise) return this.initPromise;
-    this.initPromise = this._start();
+    this.initPromise = this._start(externalCtx);
     return this.initPromise;
   }
 
-  private async _start(): Promise<void> {
+  private async _start(externalCtx?: AudioContext): Promise<void> {
     this.setStatus('loading');
     try {
       const wasmModule = await loadJP8Wasm();
-      this.audioCtx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+
+      if (externalCtx) {
+        this.audioCtx = externalCtx;
+        this.ownsContext = false;
+      } else {
+        this.audioCtx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+        this.ownsContext = true;
+      }
 
       this.paramSab = new SharedArrayBuffer(PARAM_COUNT * 4);
       this.paramView = new Float32Array(this.paramSab);
@@ -60,7 +74,11 @@ export class JP8Engine {
           telemetrySab: this.telemetrySab,
         },
       });
-      this.workletNode.connect(this.audioCtx.destination);
+
+      // Don't auto-connect to destination — caller (rack or standalone) handles routing
+      if (this.ownsContext) {
+        this.workletNode.connect(this.audioCtx.destination);
+      }
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('JP8 init timeout')), 5000);
@@ -69,6 +87,10 @@ export class JP8Engine {
           else if (ev.data.type === 'error') { clearTimeout(timeout); reject(new Error(ev.data.message)); }
         };
       });
+
+      if (this.ownsContext) {
+        await this.audioCtx.resume();
+      }
 
       this.setStatus('ready');
     } catch (err) {
@@ -79,8 +101,7 @@ export class JP8Engine {
 
   private writeDefaults() {
     const p = this.paramView!;
-    // New layout matching engine.rs apply_params order
-    p[P.VCO1_WAVE] = 1;     // saw
+    p[P.VCO1_WAVE] = 1;
     p[P.VCO1_RANGE] = 0;
     p[P.VCO1_PW] = 0.5;
     p[P.VCO1_LEVEL] = 0.8;
@@ -121,11 +142,26 @@ export class JP8Engine {
     p[P.ARP_TEMPO] = 120;
   }
 
+  // --- Parameter access ---
+
   setParam(index: number, value: number) {
     if (this.paramView && index >= 0 && index < PARAM_COUNT) {
       this.paramView[index] = value;
     }
   }
+
+  /** Read current params from SAB. Used when switching tabs to restore UI state. */
+  getParams(): number[] {
+    if (!this.paramView) return new Array(PARAM_COUNT).fill(0);
+    return Array.from(this.paramView);
+  }
+
+  /** Get the AudioWorkletNode for connecting to external mixer routing. */
+  getAudioNode(): AudioNode | null {
+    return this.workletNode;
+  }
+
+  // --- Notes ---
 
   noteOn(note: number, velocity = 100) {
     this.workletNode?.port.postMessage({ type: 'note-on', note, velocity });
@@ -137,15 +173,21 @@ export class JP8Engine {
     this.workletNode?.port.postMessage({ type: 'all-notes-off' });
   }
 
+  // --- Telemetry ---
+
   getActiveVoices(): number {
     if (!this.telemetryInt32) return 0;
     return Atomics.load(this.telemetryInt32, SAB_ACTIVE_VOICES);
   }
 
+  // --- Lifecycle ---
+
   async stop() {
     this.allNotesOff();
     this.workletNode?.disconnect();
-    await this.audioCtx?.close();
+    if (this.ownsContext) {
+      await this.audioCtx?.close();
+    }
     this.audioCtx = null;
     this.workletNode = null;
     this.setStatus('idle');

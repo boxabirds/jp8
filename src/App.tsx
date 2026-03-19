@@ -1,5 +1,5 @@
-import { JP8Panel } from './ui/JP8Panel';
+import { RackView } from './ui/RackView';
 
 export default function App() {
-  return <JP8Panel />;
+  return <RackView />;
 }

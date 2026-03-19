@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "lsof -ti :5173 | xargs kill -9 2>/dev/null; bunx vite",
     "build": "bunx vite build",
-    "preview": "lsof -ti :4173 | xargs kill -9 2>/dev/null; bunx vite preview"
+    "preview": "lsof -ti :4173 | xargs kill -9 2>/dev/null; bunx vite preview",
+    "test:e2e": "npx playwright test --headed"
   },
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^4.3.4",
