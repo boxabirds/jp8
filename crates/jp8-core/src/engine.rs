@@ -5,6 +5,7 @@ use crate::allocator::VoiceAllocator;
 use crate::arpeggiator::{ArpMode, Arpeggiator};
 use crate::benjolin::Benjolin;
 use crate::chorus::{ChorusMode, StereoChorus};
+use crate::modal::ModalResonator;
 use crate::lfo::{Lfo, LfoWave};
 use crate::params::{EngineParams, PARAM_COUNT};
 use crate::voice::Voice;
@@ -14,6 +15,7 @@ const NUM_VOICES: usize = 8;
 pub struct Engine {
     voices: [Voice; NUM_VOICES],
     chorus: StereoChorus,
+    modal: ModalResonator,
     voice_allocator: VoiceAllocator,
     arp: Arpeggiator,
     pub params: EngineParams,
@@ -29,6 +31,7 @@ impl Engine {
         Self {
             voices,
             chorus: StereoChorus::new(sample_rate),
+            modal: ModalResonator::new(sample_rate),
             voice_allocator: VoiceAllocator::new(),
             arp: Arpeggiator::new(sample_rate),
             params: EngineParams::default_patch(),
@@ -207,6 +210,16 @@ impl Engine {
             _ => ChorusMode::Mode12,
         };
 
+        // Modal resonator
+        if self.params.modal_mix > 0.0 {
+            self.modal.set_params(
+                self.params.modal_body,
+                self.params.modal_material,
+                self.params.modal_modes,
+                self.params.modal_inharmonicity,
+            );
+        }
+
         // Benjolin chaos modulator
         self.benjolin.set_params(
             self.params.chaos_rate1,
@@ -262,7 +275,15 @@ impl Engine {
                 }
             }
 
-            let (left, right) = self.chorus.tick(mono_sum);
+            // Modal resonator (post-filter effect, dry/wet mix)
+            let modal_input = if params.modal_mix > 0.0 {
+                let resonated = self.modal.tick(mono_sum);
+                mono_sum * (1.0 - params.modal_mix) + resonated * params.modal_mix
+            } else {
+                mono_sum
+            };
+
+            let (left, right) = self.chorus.tick(modal_input);
 
             let vol = params.master_volume;
             let idx = frame * 2;
