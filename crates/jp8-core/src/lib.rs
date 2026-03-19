@@ -1,6 +1,7 @@
 pub mod allocator;
 pub mod arpeggiator;
 pub mod benjolin;
+pub mod bubble;
 pub mod chorus;
 pub mod modal;
 pub mod engine;

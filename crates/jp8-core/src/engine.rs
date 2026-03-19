@@ -4,6 +4,7 @@
 use crate::allocator::VoiceAllocator;
 use crate::arpeggiator::{ArpMode, Arpeggiator};
 use crate::benjolin::Benjolin;
+use crate::bubble::BubbleOscillator;
 use crate::chorus::{ChorusMode, StereoChorus};
 use crate::modal::ModalResonator;
 use crate::lfo::{Lfo, LfoWave};
@@ -14,6 +15,7 @@ const NUM_VOICES: usize = 8;
 
 pub struct Engine {
     voices: [Voice; NUM_VOICES],
+    bubble: BubbleOscillator,
     chorus: StereoChorus,
     modal: ModalResonator,
     voice_allocator: VoiceAllocator,
@@ -30,6 +32,7 @@ impl Engine {
         let voices = core::array::from_fn(|i| Voice::new(sample_rate, i));
         Self {
             voices,
+            bubble: BubbleOscillator::new(sample_rate),
             chorus: StereoChorus::new(sample_rate),
             modal: ModalResonator::new(sample_rate),
             voice_allocator: VoiceAllocator::new(),
@@ -220,6 +223,15 @@ impl Engine {
             );
         }
 
+        // Bubble oscillator
+        if self.params.bubble_enable > 0 {
+            self.bubble.set_params(
+                self.params.bubble_rate,
+                self.params.bubble_min_size,
+                self.params.bubble_max_size,
+            );
+        }
+
         // Benjolin chaos modulator
         self.benjolin.set_params(
             self.params.chaos_rate1,
@@ -273,6 +285,11 @@ impl Engine {
                     mono_sum += sample;
                     self.voice_allocator.update_env_level(i, voice.env2.level);
                 }
+            }
+
+            // Bubble oscillator (additive mixer source)
+            if params.bubble_enable > 0 && params.bubble_level > 0.0 {
+                mono_sum += self.bubble.tick() * params.bubble_level;
             }
 
             // Modal resonator (post-filter effect, dry/wet mix)
