@@ -61,6 +61,14 @@ impl VoiceAllocator {
         count
     }
 
+    /// Mark a specific voice as active (used by unison mode).
+    pub fn mark_active(&mut self, voice: usize, note: u8) {
+        if voice < MAX_VOICES {
+            self.voices_active[voice] = true;
+            self.voices_note[voice] = note;
+        }
+    }
+
     /// Update envelope levels for voice stealing decisions.
     pub fn update_env_level(&mut self, voice: usize, level: f32) {
         if voice < MAX_VOICES {

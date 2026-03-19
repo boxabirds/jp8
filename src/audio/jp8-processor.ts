@@ -16,7 +16,7 @@ import init, {
 
 const BLOCK_FRAMES = 128;
 const CHANNELS = 2;
-const PARAM_COUNT = 32;
+const PARAM_COUNT = 40;
 
 // SAB telemetry layout
 const SAB_ACTIVE_VOICES = 0;

@@ -7,10 +7,11 @@ import { ButtonGroup } from './ButtonGroup';
 import { HSlider } from './HSlider';
 import { Keyboard } from './Keyboard';
 
+// Wave flags: bit0=saw, bit1=pulse. Values: 1=saw, 2=pulse, 3=saw+pulse
 const WAVE_OPTS = [
-  { label: '⩘', value: 0 },  // Saw
-  { label: '⌇', value: 1 },  // Pulse
-  { label: '⊓', value: 2 },  // Square
+  { label: '⩘', value: 1 },      // Saw only
+  { label: '⌇', value: 2 },      // Pulse only
+  { label: '⩘+⌇', value: 3 },   // Saw + Pulse (additive)
 ];
 
 const LFO_OPTS = [
@@ -34,12 +35,26 @@ const ASSIGN_OPTS = [
   { label: 'SOLO', value: 3 },
 ];
 
+const ARP_OPTS = [
+  { label: 'OFF', value: 0 },
+  { label: 'UP', value: 1 },
+  { label: 'DN', value: 2 },
+  { label: 'U/D', value: 3 },
+];
+
+const ARP_RANGE_OPTS = [
+  { label: '1', value: 1 },
+  { label: '2', value: 2 },
+  { label: '3', value: 3 },
+  { label: '4', value: 4 },
+];
+
 export function JP8Panel() {
   const engineRef = useRef<JP8Engine | null>(null);
   const [status, setStatus] = useState<string>('idle');
   const [activePatch, setActivePatch] = useState(0);
 
-  // All 32 params as state — initialized from first factory patch
+  // All 40 params as state — initialized from first factory patch
   const [params, setParams] = useState<number[]>(() => [...FACTORY_PATCHES[0].params]);
 
   const engine = () => engineRef.current;
@@ -107,6 +122,10 @@ export function JP8Panel() {
           <div style={styles.headerControls}>
             <ButtonGroup label="Chorus" options={CHORUS_OPTS} selected={params[P.CHORUS]} onChange={v => setP(P.CHORUS, v)} />
             <ButtonGroup label="Assign" options={ASSIGN_OPTS} selected={params[P.ASSIGN]} onChange={v => setP(P.ASSIGN, v)} />
+            <ButtonGroup label="Arp" options={ARP_OPTS} selected={params[P.ARP_MODE]} onChange={v => setP(P.ARP_MODE, v)} />
+            <ButtonGroup label="Oct" options={ARP_RANGE_OPTS} selected={params[P.ARP_RANGE]} onChange={v => setP(P.ARP_RANGE, v)} />
+            <HSlider label="Tempo" value={params[P.ARP_TEMPO]} min={30} max={300} step={1} onChange={v => setP(P.ARP_TEMPO, v)} width={60} />
+            <HSlider label="Porta" value={params[P.PORTAMENTO]} min={0} max={5} step={0.01} onChange={v => setP(P.PORTAMENTO, v)} width={60} />
             <HSlider label="Volume" value={params[P.VOLUME]} min={0} max={1} step={0.01} onChange={v => setP(P.VOLUME, v)} width={90} />
           </div>
           {!isReady ? (
@@ -134,16 +153,14 @@ export function JP8Panel() {
 
         {/* Control Sections */}
         <div style={styles.sections}>
-          {/* VCO-1 */}
           <Section title="VCO-1">
             <ButtonGroup label="Wave" options={WAVE_OPTS} selected={params[P.VCO1_WAVE]} onChange={v => setP(P.VCO1_WAVE, v)} />
             <Slider label="Range" value={params[P.VCO1_RANGE]} min={-2} max={2} step={1} onChange={v => setP(P.VCO1_RANGE, v)} />
             <Slider label="PW" value={params[P.VCO1_PW]} min={0.05} max={0.95} step={0.01} onChange={v => setP(P.VCO1_PW, v)} />
             <Slider label="Level" value={params[P.VCO1_LEVEL]} min={0} max={1} step={0.01} onChange={v => setP(P.VCO1_LEVEL, v)} />
+            <Slider label="Sub" value={params[P.SUB_OSC]} min={0} max={1} step={0.01} onChange={v => setP(P.SUB_OSC, v)} />
           </Section>
           <Divider />
-
-          {/* VCO-2 */}
           <Section title="VCO-2">
             <ButtonGroup label="Wave" options={WAVE_OPTS} selected={params[P.VCO2_WAVE]} onChange={v => setP(P.VCO2_WAVE, v)} />
             <Slider label="Range" value={params[P.VCO2_RANGE]} min={-2} max={2} step={1} onChange={v => setP(P.VCO2_RANGE, v)} />
@@ -152,33 +169,30 @@ export function JP8Panel() {
             <Slider label="Detune" value={params[P.VCO2_DETUNE]} min={-1} max={1} step={0.01} onChange={v => setP(P.VCO2_DETUNE, v)} />
           </Section>
           <Divider />
-
-          {/* MIXER */}
           <Section title="MIX">
             <Slider label="X-Mod" value={params[P.CROSS_MOD]} min={0} max={1} step={0.01} onChange={v => setP(P.CROSS_MOD, v)} />
             <Slider label="Noise" value={params[P.NOISE]} min={0} max={1} step={0.01} onChange={v => setP(P.NOISE, v)} />
           </Section>
           <Divider />
-
-          {/* VCF */}
+          <Section title="HPF">
+            <Slider label="Freq" value={params[P.HPF_CUTOFF]} min={20} max={6000} step={5} onChange={v => setP(P.HPF_CUTOFF, v)} displayValue={`${Math.round(params[P.HPF_CUTOFF])}`} />
+          </Section>
+          <Divider />
           <Section title="VCF">
-            <Slider label="Cutoff" value={params[P.FILTER_CUTOFF]} min={20} max={20000} step={10} onChange={v => setP(P.FILTER_CUTOFF, v)} unit="Hz" displayValue={`${Math.round(params[P.FILTER_CUTOFF])}`} />
+            <Slider label="Cutoff" value={params[P.FILTER_CUTOFF]} min={20} max={20000} step={10} onChange={v => setP(P.FILTER_CUTOFF, v)} displayValue={`${Math.round(params[P.FILTER_CUTOFF])}`} />
             <Slider label="Reso" value={params[P.FILTER_RESO]} min={0} max={1} step={0.01} onChange={v => setP(P.FILTER_RESO, v)} />
             <Slider label="Env" value={params[P.FILTER_ENV]} min={-1} max={1} step={0.01} onChange={v => setP(P.FILTER_ENV, v)} />
             <Slider label="Key" value={params[P.FILTER_KEY]} min={0} max={1} step={0.01} onChange={v => setP(P.FILTER_KEY, v)} />
           </Section>
           <Divider />
-
-          {/* ENV-1 (Filter) */}
           <Section title="ENV-1">
             <Slider label="A" value={params[P.ENV1_A]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV1_A, v)} />
             <Slider label="D" value={params[P.ENV1_D]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV1_D, v)} />
             <Slider label="S" value={params[P.ENV1_S]} min={0} max={1} step={0.01} onChange={v => setP(P.ENV1_S, v)} />
             <Slider label="R" value={params[P.ENV1_R]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV1_R, v)} />
+            <ButtonGroup label="→VCA" options={[{label:'OFF',value:0},{label:'ON',value:1}]} selected={params[P.ENV1_VCA]} onChange={v => setP(P.ENV1_VCA, v)} />
           </Section>
           <Divider />
-
-          {/* ENV-2 (Amp) */}
           <Section title="ENV-2">
             <Slider label="A" value={params[P.ENV2_A]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_A, v)} />
             <Slider label="D" value={params[P.ENV2_D]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_D, v)} />
@@ -186,11 +200,10 @@ export function JP8Panel() {
             <Slider label="R" value={params[P.ENV2_R]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_R, v)} />
           </Section>
           <Divider />
-
-          {/* LFO */}
           <Section title="LFO">
             <ButtonGroup label="Wave" options={LFO_OPTS} selected={params[P.LFO_WAVE]} onChange={v => setP(P.LFO_WAVE, v)} />
             <Slider label="Rate" value={params[P.LFO_RATE]} min={0.1} max={30} step={0.1} onChange={v => setP(P.LFO_RATE, v)} unit="Hz" />
+            <Slider label="Delay" value={params[P.LFO_DELAY]} min={0} max={5} step={0.01} onChange={v => setP(P.LFO_DELAY, v)} unit="s" />
             <Slider label="Pitch" value={params[P.LFO_PITCH]} min={0} max={1} step={0.01} onChange={v => setP(P.LFO_PITCH, v)} />
             <Slider label="Filter" value={params[P.LFO_FILTER]} min={0} max={1} step={0.01} onChange={v => setP(P.LFO_FILTER, v)} />
             <Slider label="PWM" value={params[P.LFO_PWM]} min={0} max={1} step={0.01} onChange={v => setP(P.LFO_PWM, v)} />

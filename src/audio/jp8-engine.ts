@@ -1,14 +1,13 @@
 /**
  * JP-8 Engine — Main thread facade.
- * SAB for params (UI writes, audio reads) and telemetry (audio writes, UI reads).
- * postMessage only for notes.
+ * SAB for params (40 × f32), postMessage for notes.
  */
 
 import { loadJP8Wasm } from './wasm-loader';
 
 export type JP8EngineStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-const PARAM_COUNT = 32;
+const PARAM_COUNT = 40;
 const TELEMETRY_SAB_BYTES = 16;
 const SAB_ACTIVE_VOICES = 0;
 
@@ -42,16 +41,13 @@ export class JP8Engine {
       const wasmModule = await loadJP8Wasm();
       this.audioCtx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
 
-      // SABs
       this.paramSab = new SharedArrayBuffer(PARAM_COUNT * 4);
       this.paramView = new Float32Array(this.paramSab);
       this.telemetrySab = new SharedArrayBuffer(TELEMETRY_SAB_BYTES);
       this.telemetryInt32 = new Int32Array(this.telemetrySab, 0, 4);
 
-      // Write default params
       this.writeDefaults();
 
-      // Load processor (Vite transforms .ts)
       const processorUrl = new URL('./jp8-processor.ts', import.meta.url).href;
       await this.audioCtx.audioWorklet.addModule(processorUrl);
 
@@ -83,49 +79,54 @@ export class JP8Engine {
 
   private writeDefaults() {
     const p = this.paramView!;
-    // Matches spec §5.1 defaults
-    p[0] = 0;     // VCO1 Waveform (Saw)
-    p[1] = 0;     // VCO1 Range
-    p[2] = 0.5;   // VCO1 PW
-    p[3] = 0.8;   // VCO1 Level
-    p[4] = 0;     // VCO2 Waveform
-    p[5] = 0;     // VCO2 Range
-    p[6] = 0.5;   // VCO2 PW
-    p[7] = 0.8;   // VCO2 Level
-    p[8] = 0;     // VCO2 Detune
-    p[9] = 0;     // Cross Mod
-    p[10] = 0;    // Noise
-    p[11] = 8000; // Filter Cutoff
-    p[12] = 0;    // Resonance
-    p[13] = 0.5;  // Filter Env Depth
-    p[14] = 0.5;  // Key Track
-    p[15] = 0.01; // Env1 Attack
-    p[16] = 0.3;  // Env1 Decay
-    p[17] = 0.6;  // Env1 Sustain
-    p[18] = 0.5;  // Env1 Release
-    p[19] = 0.01; // Env2 Attack
-    p[20] = 0.3;  // Env2 Decay
-    p[21] = 0.7;  // Env2 Sustain
-    p[22] = 0.5;  // Env2 Release
-    p[23] = 5.0;  // LFO Rate
-    p[24] = 0;    // LFO Waveform
-    p[25] = 0;    // LFO Pitch
-    p[26] = 0;    // LFO Filter
-    p[27] = 0;    // LFO PWM
-    p[28] = 3;    // Chorus (I+II)
-    p[29] = 0.7;  // Master Volume
-    p[30] = 0;    // Assign (Poly8)
-    p[31] = 0;    // Portamento
+    // New layout matching engine.rs apply_params order
+    p[P.VCO1_WAVE] = 1;     // saw
+    p[P.VCO1_RANGE] = 0;
+    p[P.VCO1_PW] = 0.5;
+    p[P.VCO1_LEVEL] = 0.8;
+    p[P.VCO2_WAVE] = 1;
+    p[P.VCO2_RANGE] = 0;
+    p[P.VCO2_PW] = 0.5;
+    p[P.VCO2_LEVEL] = 0.8;
+    p[P.VCO2_DETUNE] = 0;
+    p[P.CROSS_MOD] = 0;
+    p[P.NOISE] = 0;
+    p[P.SUB_OSC] = 0;
+    p[P.FILTER_CUTOFF] = 8000;
+    p[P.FILTER_RESO] = 0;
+    p[P.FILTER_ENV] = 0.5;
+    p[P.FILTER_KEY] = 0.5;
+    p[P.HPF_CUTOFF] = 20;
+    p[P.ENV1_A] = 0.01;
+    p[P.ENV1_D] = 0.3;
+    p[P.ENV1_S] = 0.6;
+    p[P.ENV1_R] = 0.5;
+    p[P.ENV1_VCA] = 0;
+    p[P.ENV2_A] = 0.01;
+    p[P.ENV2_D] = 0.3;
+    p[P.ENV2_S] = 0.7;
+    p[P.ENV2_R] = 0.5;
+    p[P.LFO_RATE] = 5;
+    p[P.LFO_WAVE] = 0;
+    p[P.LFO_PITCH] = 0;
+    p[P.LFO_FILTER] = 0;
+    p[P.LFO_PWM] = 0;
+    p[P.LFO_DELAY] = 0;
+    p[P.CHORUS] = 3;
+    p[P.VOLUME] = 0.7;
+    p[P.ASSIGN] = 0;
+    p[P.PORTAMENTO] = 0;
+    p[P.ARP_MODE] = 0;
+    p[P.ARP_RANGE] = 1;
+    p[P.ARP_TEMPO] = 120;
   }
 
-  /** Set a parameter by spec index (§5.1). Lock-free write to SAB. */
   setParam(index: number, value: number) {
     if (this.paramView && index >= 0 && index < PARAM_COUNT) {
       this.paramView[index] = value;
     }
   }
 
-  // --- Notes (postMessage) ---
   noteOn(note: number, velocity = 100) {
     this.workletNode?.port.postMessage({ type: 'note-on', note, velocity });
   }
@@ -152,14 +153,19 @@ export class JP8Engine {
   }
 }
 
-// Spec §5.1 parameter indices — exported for UI binding
+// SAB parameter indices — matches engine.rs apply_params order
 export const P = {
   VCO1_WAVE: 0, VCO1_RANGE: 1, VCO1_PW: 2, VCO1_LEVEL: 3,
   VCO2_WAVE: 4, VCO2_RANGE: 5, VCO2_PW: 6, VCO2_LEVEL: 7,
-  VCO2_DETUNE: 8, CROSS_MOD: 9, NOISE: 10,
-  FILTER_CUTOFF: 11, FILTER_RESO: 12, FILTER_ENV: 13, FILTER_KEY: 14,
-  ENV1_A: 15, ENV1_D: 16, ENV1_S: 17, ENV1_R: 18,
-  ENV2_A: 19, ENV2_D: 20, ENV2_S: 21, ENV2_R: 22,
-  LFO_RATE: 23, LFO_WAVE: 24, LFO_PITCH: 25, LFO_FILTER: 26, LFO_PWM: 27,
-  CHORUS: 28, VOLUME: 29, ASSIGN: 30, PORTAMENTO: 31,
+  VCO2_DETUNE: 8, CROSS_MOD: 9, NOISE: 10, SUB_OSC: 11,
+  FILTER_CUTOFF: 12, FILTER_RESO: 13, FILTER_ENV: 14, FILTER_KEY: 15,
+  HPF_CUTOFF: 16,
+  ENV1_A: 17, ENV1_D: 18, ENV1_S: 19, ENV1_R: 20, ENV1_VCA: 21,
+  ENV2_A: 22, ENV2_D: 23, ENV2_S: 24, ENV2_R: 25,
+  LFO_RATE: 26, LFO_WAVE: 27, LFO_PITCH: 28, LFO_FILTER: 29,
+  LFO_PWM: 30, LFO_DELAY: 31,
+  CHORUS: 32, VOLUME: 33, ASSIGN: 34, PORTAMENTO: 35,
+  ARP_MODE: 36, ARP_RANGE: 37, ARP_TEMPO: 38,
 } as const;
+
+export const PARAM_TOTAL = PARAM_COUNT;
