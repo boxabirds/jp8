@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 
 interface KeyboardProps {
   onNoteOn: (note: number) => void;
@@ -19,16 +19,14 @@ const blackKeyOffset: Record<number, number> = {
   1: 0.6, 3: 1.6, 6: 3.6, 8: 4.6, 10: 5.6,
 };
 
-/**
- * On-screen piano keyboard with pointer and keyboard input.
- */
 export function Keyboard({
   onNoteOn,
   onNoteOff,
   startNote = START_NOTE_DEFAULT,
   numOctaves = NUM_OCTAVES_DEFAULT,
 }: KeyboardProps) {
-  const activeNotes = useRef(new Set<number>());
+  const pointerDown = useRef(false);
+  const currentNote = useRef<number | null>(null);
   const endNote = startNote + numOctaves * 12;
 
   const whiteKeys: number[] = [];
@@ -41,27 +39,58 @@ export function Keyboard({
   const WHITE_KEY_WIDTH = 28;
   const totalWidth = whiteKeys.length * WHITE_KEY_WIDTH;
 
-  const handleDown = useCallback(
-    (note: number) => {
-      if (!activeNotes.current.has(note)) {
-        activeNotes.current.add(note);
-        onNoteOn(note);
-      }
-    },
-    [onNoteOn],
-  );
+  // Get MIDI note from a data-note attribute on a key element
+  const noteFromPoint = useCallback((x: number, y: number): number | null => {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!el) return null;
+    const noteStr = el.getAttribute('data-note');
+    return noteStr !== null ? parseInt(noteStr, 10) : null;
+  }, []);
 
-  const handleUp = useCallback(
-    (note: number) => {
-      if (activeNotes.current.has(note)) {
-        activeNotes.current.delete(note);
-        onNoteOff(note);
-      }
-    },
-    [onNoteOff],
-  );
+  const triggerNote = useCallback((note: number | null) => {
+    const prev = currentNote.current;
+    if (note === prev) return;
+    if (prev !== null) {
+      onNoteOff(prev);
+    }
+    currentNote.current = note;
+    if (note !== null) {
+      onNoteOn(note);
+    }
+  }, [onNoteOn, onNoteOff]);
 
-  // Computer keyboard mapping (ZSXDCVGBHNJM... → notes)
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    pointerDown.current = true;
+    // Don't setPointerCapture — we need elementFromPoint to find keys during drag
+    e.preventDefault();
+    const note = noteFromPoint(e.clientX, e.clientY);
+    triggerNote(note);
+  }, [noteFromPoint, triggerNote]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!pointerDown.current) return;
+    const note = noteFromPoint(e.clientX, e.clientY);
+    triggerNote(note);
+  }, [noteFromPoint, triggerNote]);
+
+  const onPointerUp = useCallback(() => {
+    pointerDown.current = false;
+    triggerNote(null);
+  }, [triggerNote]);
+
+  // Global pointerup to catch releases outside the keyboard area
+  useEffect(() => {
+    const handler = () => {
+      if (pointerDown.current) {
+        pointerDown.current = false;
+        triggerNote(null);
+      }
+    };
+    window.addEventListener('pointerup', handler);
+    return () => window.removeEventListener('pointerup', handler);
+  }, [triggerNote]);
+
+  // Computer keyboard mapping
   const keyMap = useRef(new Map<string, number>());
   if (keyMap.current.size === 0) {
     const rows = [
@@ -75,7 +104,6 @@ export function Keyboard({
     });
   }
 
-  // Keyboard listeners
   const keyboardActive = useRef(new Set<string>());
 
   const onKeyDown = useCallback(
@@ -85,10 +113,10 @@ export function Keyboard({
       const note = keyMap.current.get(key);
       if (note !== undefined && !keyboardActive.current.has(key)) {
         keyboardActive.current.add(key);
-        handleDown(note);
+        onNoteOn(note);
       }
     },
-    [handleDown],
+    [onNoteOn],
   );
 
   const onKeyUp = useCallback(
@@ -97,16 +125,14 @@ export function Keyboard({
       const note = keyMap.current.get(key);
       if (note !== undefined && keyboardActive.current.has(key)) {
         keyboardActive.current.delete(key);
-        handleUp(note);
+        onNoteOff(note);
       }
     },
-    [handleUp],
+    [onNoteOff],
   );
 
-  // White key x position
   const whiteKeyX = (idx: number) => idx * WHITE_KEY_WIDTH;
 
-  // Black key position relative to white keys
   const blackKeyX = (note: number) => {
     const octave = Math.floor((note - startNote) / 12);
     const semitone = note % 12;
@@ -121,36 +147,30 @@ export function Keyboard({
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
     >
-      <div style={{ ...styles.keyboard, width: totalWidth }}>
-        {/* White keys */}
+      <div
+        style={{ ...styles.keyboard, width: totalWidth }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
         {whiteKeys.map((note, i) => (
           <div
             key={note}
-            style={{
-              ...styles.whiteKey,
-              left: whiteKeyX(i),
-            }}
-            onPointerDown={() => handleDown(note)}
-            onPointerUp={() => handleUp(note)}
-            onPointerLeave={() => handleUp(note)}
+            data-note={note}
+            style={{ ...styles.whiteKey, left: whiteKeyX(i) }}
           />
         ))}
-        {/* Black keys */}
         {blackKeys.map((note) => (
           <div
             key={note}
-            style={{
-              ...styles.blackKey,
-              left: blackKeyX(note),
-            }}
-            onPointerDown={() => handleDown(note)}
-            onPointerUp={() => handleUp(note)}
-            onPointerLeave={() => handleUp(note)}
+            data-note={note}
+            style={{ ...styles.blackKey, left: blackKeyX(note) }}
           />
         ))}
       </div>
       <div style={styles.hint}>
-        Click keys or use computer keyboard (Z-M lower, Q-P upper octave)
+        Click &amp; drag keys, or use computer keyboard (Z-M lower, Q-P upper)
       </div>
     </div>
   );
@@ -165,7 +185,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   keyboard: {
     position: 'relative',
-    height: 110,
+    height: 100,
     userSelect: 'none',
     touchAction: 'none',
   },
@@ -173,24 +193,22 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'absolute',
     top: 0,
     width: 26,
-    height: 110,
+    height: 100,
     backgroundColor: '#f0ece4',
     border: '1px solid #888',
     borderRadius: '0 0 4px 4px',
     cursor: 'pointer',
-    transition: 'background-color 0.05s',
   },
   blackKey: {
     position: 'absolute',
     top: 0,
     width: 18,
-    height: 68,
+    height: 62,
     backgroundColor: '#1a1a1a',
     border: '1px solid #333',
     borderRadius: '0 0 3px 3px',
     cursor: 'pointer',
     zIndex: 1,
-    transition: 'background-color 0.05s',
   },
   hint: {
     fontSize: 10,

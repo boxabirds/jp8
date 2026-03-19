@@ -49,8 +49,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 2,
   },
   button: {
-    padding: '4px 8px',
-    fontSize: 9,
+    padding: '3px 6px',
+    fontSize: 8,
     fontWeight: 600,
     fontFamily: 'Inter, sans-serif',
     color: '#ccc',

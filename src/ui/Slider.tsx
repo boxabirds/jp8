@@ -87,8 +87,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 4,
-    width: 44,
+    gap: 3,
+    width: 36,
     userSelect: 'none',
   },
   label: {
@@ -104,7 +104,7 @@ const styles: Record<string, React.CSSProperties> = {
   track: {
     position: 'relative',
     width: 6,
-    height: 90,
+    height: 70,
     backgroundColor: '#1a1a1a',
     borderRadius: 3,
     cursor: 'pointer',

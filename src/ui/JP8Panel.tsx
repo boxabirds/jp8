@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { JP8Engine, P } from '../audio/jp8-engine';
+import { FACTORY_PATCHES } from '../synth/patches';
 import { setupMIDI } from '../synth/midi';
 import { Slider } from './Slider';
 import { ButtonGroup } from './ButtonGroup';
+import { HSlider } from './HSlider';
 import { Keyboard } from './Keyboard';
 
 const WAVE_OPTS = [
@@ -35,18 +37,10 @@ const ASSIGN_OPTS = [
 export function JP8Panel() {
   const engineRef = useRef<JP8Engine | null>(null);
   const [status, setStatus] = useState<string>('idle');
+  const [activePatch, setActivePatch] = useState(0);
 
-  // All 32 params as state (spec §5.1 defaults)
-  const [params, setParams] = useState<number[]>([
-    0, 0, 0.5, 0.8,       // VCO1: wave, range, pw, level
-    0, 0, 0.5, 0.8,       // VCO2: wave, range, pw, level
-    0, 0, 0,               // detune, cross_mod, noise
-    8000, 0, 0.5, 0.5,    // filter: cutoff, reso, env_depth, key_track
-    0.01, 0.3, 0.6, 0.5,  // env1: A, D, S, R
-    0.01, 0.3, 0.7, 0.5,  // env2: A, D, S, R
-    5, 0, 0, 0, 0,        // LFO: rate, wave, pitch, filter, pwm
-    3, 0.7, 0, 0,         // chorus, volume, assign, portamento
-  ]);
+  // All 32 params as state — initialized from first factory patch
+  const [params, setParams] = useState<number[]>(() => [...FACTORY_PATCHES[0].params]);
 
   const engine = () => engineRef.current;
 
@@ -59,6 +53,20 @@ export function JP8Panel() {
     engine()?.setParam(index, value);
   }, []);
 
+  const loadPatch = useCallback((index: number) => {
+    const patch = FACTORY_PATCHES[index];
+    if (!patch) return;
+    setActivePatch(index);
+    setParams([...patch.params]);
+    // Write all 32 params to SAB
+    const eng = engine();
+    if (eng) {
+      for (let i = 0; i < patch.params.length; i++) {
+        eng.setParam(i, patch.params[i]);
+      }
+    }
+  }, []);
+
   const handleStart = useCallback(async () => {
     if (engineRef.current) return;
     const eng = new JP8Engine();
@@ -66,9 +74,14 @@ export function JP8Panel() {
     eng.setStatusCallback(setStatus);
     await eng.start();
     if (eng.getStatus() === 'ready') {
+      // Load the active patch into the engine
+      const patch = FACTORY_PATCHES[activePatch];
+      for (let i = 0; i < patch.params.length; i++) {
+        eng.setParam(i, patch.params[i]);
+      }
       setupMIDI(eng);
     }
-  }, []);
+  }, [activePatch]);
 
   useEffect(() => {
     return () => { engineRef.current?.stop(); };
@@ -90,6 +103,12 @@ export function JP8Panel() {
             <span style={styles.brandSub}>Virtual Analog Synthesizer</span>
           </div>
           <div style={{ flex: 1 }} />
+          {/* Output controls — RHS */}
+          <div style={styles.headerControls}>
+            <ButtonGroup label="Chorus" options={CHORUS_OPTS} selected={params[P.CHORUS]} onChange={v => setP(P.CHORUS, v)} />
+            <ButtonGroup label="Assign" options={ASSIGN_OPTS} selected={params[P.ASSIGN]} onChange={v => setP(P.ASSIGN, v)} />
+            <HSlider label="Volume" value={params[P.VOLUME]} min={0} max={1} step={0.01} onChange={v => setP(P.VOLUME, v)} width={90} />
+          </div>
           {!isReady ? (
             <button style={styles.startButton} onClick={handleStart}>
               {status === 'loading' ? 'Loading...' : status === 'error' ? 'Error' : 'Start Audio'}
@@ -97,6 +116,20 @@ export function JP8Panel() {
           ) : (
             <div style={styles.statusBadge}>ACTIVE</div>
           )}
+        </div>
+
+        {/* Patch Bank */}
+        <div style={styles.patchBank}>
+          {FACTORY_PATCHES.map((patch, i) => (
+            <button
+              key={i}
+              style={{ ...styles.patchButton, ...(activePatch === i ? styles.patchActive : {}) }}
+              onClick={() => loadPatch(i)}
+            >
+              <span style={styles.patchNumber}>{String(i + 1).padStart(2, '0')}</span>
+              <span>{patch.name}</span>
+            </button>
+          ))}
         </div>
 
         {/* Control Sections */}
@@ -162,14 +195,6 @@ export function JP8Panel() {
             <Slider label="Filter" value={params[P.LFO_FILTER]} min={0} max={1} step={0.01} onChange={v => setP(P.LFO_FILTER, v)} />
             <Slider label="PWM" value={params[P.LFO_PWM]} min={0} max={1} step={0.01} onChange={v => setP(P.LFO_PWM, v)} />
           </Section>
-          <Divider />
-
-          {/* CHORUS + MASTER */}
-          <Section title="OUTPUT">
-            <ButtonGroup label="Chorus" options={CHORUS_OPTS} selected={params[P.CHORUS]} onChange={v => setP(P.CHORUS, v)} />
-            <ButtonGroup label="Assign" options={ASSIGN_OPTS} selected={params[P.ASSIGN]} onChange={v => setP(P.ASSIGN, v)} />
-            <Slider label="Volume" value={params[P.VOLUME]} min={0} max={1} step={0.01} onChange={v => setP(P.VOLUME, v)} />
-          </Section>
         </div>
 
         {/* Keyboard */}
@@ -200,14 +225,19 @@ const styles: Record<string, React.CSSProperties> = {
   woodLeft: { width: 24, background: WOOD, borderRadius: '8px 0 0 8px', boxShadow: 'inset -2px 0 4px rgba(0,0,0,0.3)' },
   woodRight: { width: 24, background: WOOD, borderRadius: '0 8px 8px 0', boxShadow: 'inset 2px 0 4px rgba(0,0,0,0.3)' },
   panel: { backgroundColor: '#2d2d2d', backgroundImage: 'linear-gradient(180deg, #353535 0%, #2a2a2a 10%, #2d2d2d 100%)', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16, minWidth: 900, maxWidth: 1200, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' },
-  header: { display: 'flex', alignItems: 'center', gap: 16, borderBottom: '2px solid #444', paddingBottom: 12 },
+  header: { display: 'flex', alignItems: 'center', gap: 16, borderBottom: '2px solid #444', paddingBottom: 12, flexWrap: 'wrap' },
+  headerControls: { display: 'flex', alignItems: 'center', gap: 12 },
+  patchBank: { display: 'flex', flexWrap: 'wrap', gap: 3, padding: '4px 0', borderBottom: '1px solid #333' },
+  patchButton: { padding: '3px 8px', fontSize: 9, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: '#999', backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: 3, cursor: 'pointer', display: 'flex', gap: 4, alignItems: 'center', transition: 'all 0.1s' },
+  patchActive: { backgroundColor: '#e8a045', color: '#1a1a1a', borderColor: '#e8a045', fontWeight: 700 },
+  patchNumber: { fontSize: 8, opacity: 0.6, fontFamily: 'monospace' },
   brand: { display: 'flex', flexDirection: 'column' },
   brandName: { fontFamily: 'Orbitron, monospace', fontSize: 22, fontWeight: 700, color: '#e8a045', letterSpacing: '0.1em' },
   brandSub: { fontSize: 9, color: '#888', letterSpacing: '0.15em', textTransform: 'uppercase' },
   startButton: { padding: '8px 20px', fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif', color: '#1a1a1a', backgroundColor: '#e8a045', border: 'none', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap' },
   statusBadge: { fontSize: 11, fontWeight: 600, color: '#4ade80', whiteSpace: 'nowrap' },
-  sections: { display: 'flex', alignItems: 'flex-start', gap: 0, padding: '8px 0', overflowX: 'auto' },
-  section: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '0 6px', flexShrink: 0 },
+  sections: { display: 'flex', alignItems: 'flex-start', gap: 0, padding: '8px 0', flexWrap: 'wrap', justifyContent: 'center' },
+  section: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '0 5px' },
   sectionTitle: { fontSize: 10, fontWeight: 700, color: '#e8a045', textTransform: 'uppercase', letterSpacing: '0.12em', borderBottom: '1px solid #555', paddingBottom: 4, width: '100%', textAlign: 'center' },
   sectionContent: { display: 'flex', alignItems: 'flex-start', gap: 4 },
   divider: { width: 1, alignSelf: 'stretch', backgroundColor: '#444', margin: '0 2px', flexShrink: 0 },
