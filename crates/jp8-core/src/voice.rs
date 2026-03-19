@@ -96,9 +96,9 @@ impl Voice {
         self.env2.gate_off();
     }
 
-    /// Render one sample. `global_lfo` is the current global LFO output [-1, 1].
+    /// Render one sample. `global_lfo` and `chaos_out` are global modulation signals in [-1, 1].
     #[inline(always)]
-    pub fn render_sample(&mut self, inv_sr: f32, params: &EngineParams, global_lfo: f32) -> f32 {
+    pub fn render_sample(&mut self, inv_sr: f32, params: &EngineParams, global_lfo: f32, chaos_out: f32) -> f32 {
         if !self.env2.is_active() {
             return 0.0;
         }
@@ -109,13 +109,15 @@ impl Voice {
         }
         let lfo = global_lfo * self.lfo_delay_level;
 
-        // LFO → PWM modulation
-        let pwm_mod = lfo * params.lfo_pwm_depth * 0.4; // ±0.4 range
+        // LFO + Chaos → PWM modulation
+        let pwm_mod = lfo * params.lfo_pwm_depth * 0.4
+            + chaos_out * params.chaos_to_pwm * 0.4;
         self.vco1.pulse_width = (params.vco1_pw + pwm_mod).clamp(0.05, 0.95);
         self.vco2.pulse_width = (params.vco2_pw + pwm_mod).clamp(0.05, 0.95);
 
-        // LFO → pitch
-        let pitch_mod = lfo * params.lfo_pitch_depth;
+        // LFO + Chaos → pitch
+        let pitch_mod = lfo * params.lfo_pitch_depth
+            + chaos_out * params.chaos_to_pitch;
 
         // VCO2 first (needed for cross-mod into VCO1)
         let base_freq2 = self.vco2.target_freq;
@@ -145,8 +147,9 @@ impl Voice {
         let base_cutoff = params.filter_cutoff;
         let key_track = params.filter_key_track * (self.note as f32 - 60.0) * 50.0;
         let lfo_filter_mod = lfo * params.lfo_filter_depth * base_cutoff;
+        let chaos_filter_mod = chaos_out * params.chaos_to_filter * base_cutoff;
         let env_mod = env1_out * params.filter_env_depth * base_cutoff;
-        let cutoff = (base_cutoff + env_mod + key_track + lfo_filter_mod).clamp(20.0, 20000.0);
+        let cutoff = (base_cutoff + env_mod + key_track + lfo_filter_mod + chaos_filter_mod).clamp(20.0, 20000.0);
 
         self.filter.set_cutoff(cutoff);
         self.filter.resonance = params.filter_resonance;
@@ -193,7 +196,7 @@ mod tests {
         let mut v = Voice::new(SR, 0);
         let params = default_params();
         for _ in 0..100 {
-            assert_eq!(v.render_sample(INV_SR, &params, 0.0), 0.0);
+            assert_eq!(v.render_sample(INV_SR, &params, 0.0, 0.0), 0.0);
         }
     }
 
@@ -204,7 +207,7 @@ mod tests {
         v.note_on(60, 100, &params);
         let mut has_nonzero = false;
         for _ in 0..441 {
-            if v.render_sample(INV_SR, &params, 0.0).abs() > 1e-6 {
+            if v.render_sample(INV_SR, &params, 0.0, 0.0).abs() > 1e-6 {
                 has_nonzero = true;
                 break;
             }
@@ -221,13 +224,13 @@ mod tests {
         v.note_on(60, 100, &params);
         // Play for a bit
         for _ in 0..4410 {
-            v.render_sample(INV_SR, &params, 0.0);
+            v.render_sample(INV_SR, &params, 0.0, 0.0);
         }
         v.note_off();
         // Should silence within release time + generous margin
         // env2 release coeff targets ~0.001 after release_time
         for _ in 0..(SR as usize) {
-            v.render_sample(INV_SR, &params, 0.0);
+            v.render_sample(INV_SR, &params, 0.0, 0.0);
         }
         assert!(!v.is_active(), "Voice should be inactive after sufficient release time");
     }
@@ -240,7 +243,7 @@ mod tests {
         v_loud.note_on(60, 127, &params);
         let mut rms_loud = 0.0f32;
         for _ in 0..4410 {
-            let s = v_loud.render_sample(INV_SR, &params, 0.0);
+            let s = v_loud.render_sample(INV_SR, &params, 0.0, 0.0);
             rms_loud += s * s;
         }
 
@@ -248,7 +251,7 @@ mod tests {
         v_quiet.note_on(60, 30, &params);
         let mut rms_quiet = 0.0f32;
         for _ in 0..4410 {
-            let s = v_quiet.render_sample(INV_SR, &params, 0.0);
+            let s = v_quiet.render_sample(INV_SR, &params, 0.0, 0.0);
             rms_quiet += s * s;
         }
 
@@ -269,7 +272,7 @@ mod tests {
         let mut rms_off = 0.0f32;
         // Reach sustain
         for _ in 0..22050 {
-            let s = v1.render_sample(INV_SR, &params_off, 0.0);
+            let s = v1.render_sample(INV_SR, &params_off, 0.0, 0.0);
             rms_off += s * s;
         }
 
@@ -277,7 +280,7 @@ mod tests {
         v2.note_on(60, 100, &params_on);
         let mut rms_on = 0.0f32;
         for _ in 0..22050 {
-            let s = v2.render_sample(INV_SR, &params_on, 0.0);
+            let s = v2.render_sample(INV_SR, &params_on, 0.0, 0.0);
             rms_on += s * s;
         }
 
@@ -296,7 +299,7 @@ mod tests {
         v1.note_on(60, 100, &params_no_xmod);
         let mut rms1 = 0.0f32;
         for _ in 0..4410 {
-            let s = v1.render_sample(INV_SR, &params_no_xmod, 0.0);
+            let s = v1.render_sample(INV_SR, &params_no_xmod, 0.0, 0.0);
             rms1 += s * s;
         }
 
@@ -304,7 +307,7 @@ mod tests {
         v2.note_on(60, 100, &params_xmod);
         let mut rms2 = 0.0f32;
         for _ in 0..4410 {
-            let s = v2.render_sample(INV_SR, &params_xmod, 0.0);
+            let s = v2.render_sample(INV_SR, &params_xmod, 0.0, 0.0);
             rms2 += s * s;
         }
 
@@ -321,11 +324,11 @@ mod tests {
         v.note_on(60, 100, &params);
 
         // At sample 0, LFO delay level should be 0 (no LFO effect)
-        let _s0 = v.render_sample(INV_SR, &params, 1.0);
+        let _s0 = v.render_sample(INV_SR, &params, 1.0, 0.0);
 
         // After 1 second worth of samples, LFO delay should be ~1.0
         for _ in 1..44100 {
-            v.render_sample(INV_SR, &params, 1.0);
+            v.render_sample(INV_SR, &params, 1.0, 0.0);
         }
         // The lfo_delay_level should be close to 1.0 now
         assert!(v.lfo_delay_level > 0.95, "LFO delay should ramp to ~1.0 after delay time");
@@ -337,7 +340,7 @@ mod tests {
         let mut v = Voice::new(SR, 0);
         v.note_on(60, 100, &params);
         for _ in 0..44100 {
-            let s = v.render_sample(INV_SR, &params, 0.5);
+            let s = v.render_sample(INV_SR, &params, 0.5, 0.0);
             assert!(!s.is_nan(), "Voice produced NaN");
             assert!(!s.is_infinite(), "Voice produced Inf");
         }

@@ -29,10 +29,10 @@ export interface Patch {
   params: number[];
 }
 
-// Helper: build 40-element array with trailing zeros for reserved slots
+// Helper: build 68-element array with trailing zeros for extended module slots
 function p(values: number[]): number[] {
-  const out = new Array(40).fill(0);
-  for (let i = 0; i < values.length && i < 40; i++) out[i] = values[i];
+  const out = new Array(68).fill(0);
+  for (let i = 0; i < values.length && i < 68; i++) out[i] = values[i];
   return out;
 }
 

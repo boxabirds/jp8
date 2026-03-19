@@ -10,6 +10,7 @@ import { Slider } from './Slider';
 import { ButtonGroup } from './ButtonGroup';
 import { HSlider } from './HSlider';
 import { Keyboard } from './Keyboard';
+import { SignalFlowBar } from './SignalFlowBar';
 
 const WAVE_OPTS = [
   { label: '⩘', value: 1 },
@@ -120,6 +121,7 @@ export function JP8Panel({ engine }: JP8PanelProps) {
 
       {/* Control Sections */}
       <div style={styles.sections}>
+        <div style={{ opacity: params[P.SOURCE_MODE] !== 0 ? 0.4 : 1, transition: 'opacity 0.2s', display: 'contents' }}>
         <Section title="VCO-1">
           <ButtonGroup label="Wave" options={WAVE_OPTS} selected={params[P.VCO1_WAVE]} onChange={v => setP(P.VCO1_WAVE, v)} />
           <Slider label="Range" value={params[P.VCO1_RANGE]} min={-2} max={2} step={1} onChange={v => setP(P.VCO1_RANGE, v)} />
@@ -140,6 +142,7 @@ export function JP8Panel({ engine }: JP8PanelProps) {
           <Slider label="X-Mod" value={params[P.CROSS_MOD]} min={0} max={1} step={0.01} onChange={v => setP(P.CROSS_MOD, v)} />
           <Slider label="Noise" value={params[P.NOISE]} min={0} max={1} step={0.01} onChange={v => setP(P.NOISE, v)} />
         </Section>
+        </div>
         <Divider />
         <Section title="HPF">
           <Slider label="Freq" value={params[P.HPF_CUTOFF]} min={20} max={6000} step={5} onChange={v => setP(P.HPF_CUTOFF, v)} displayValue={`${Math.round(params[P.HPF_CUTOFF])}`} />
@@ -177,6 +180,9 @@ export function JP8Panel({ engine }: JP8PanelProps) {
         </Section>
       </div>
 
+      {/* Signal Flow Bar */}
+      <SignalFlowBar params={params} setP={setP} />
+
       {/* Keyboard */}
       <div style={styles.keyboardSection}>
         <Keyboard onNoteOn={noteOn} onNoteOff={noteOff} />
@@ -206,10 +212,10 @@ const styles: Record<string, React.CSSProperties> = {
   patchButton: { padding: '3px 8px', fontSize: 9, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: '#999', backgroundColor: '#1a1a1a', borderWidth: 1, borderStyle: 'solid', borderColor: '#333', borderRadius: 3, cursor: 'pointer', display: 'flex', gap: 4, alignItems: 'center', transition: 'all 0.1s' },
   patchActive: { backgroundColor: '#e8a045', color: '#1a1a1a', borderColor: '#e8a045', fontWeight: 700 },
   patchNumber: { fontSize: 8, opacity: 0.6, fontFamily: 'monospace' },
-  sections: { display: 'flex', alignItems: 'flex-start', gap: 0, padding: '8px 0', flexWrap: 'wrap', justifyContent: 'center' },
-  section: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '0 5px' },
-  sectionTitle: { fontSize: 10, fontWeight: 700, color: '#e8a045', textTransform: 'uppercase', letterSpacing: '0.12em', borderBottom: '1px solid #555', paddingBottom: 4, width: '100%', textAlign: 'center' },
-  sectionContent: { display: 'flex', alignItems: 'flex-start', gap: 4 },
-  divider: { width: 1, alignSelf: 'stretch', backgroundColor: '#444', margin: '0 2px', flexShrink: 0 },
+  sections: { display: 'flex', alignItems: 'flex-start', gap: 0, padding: '6px 0', flexWrap: 'wrap', justifyContent: 'center' },
+  section: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '0 3px' },
+  sectionTitle: { fontSize: 9, fontWeight: 700, color: '#e8a045', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid #555', paddingBottom: 3, width: '100%', textAlign: 'center' },
+  sectionContent: { display: 'flex', alignItems: 'flex-start', gap: 2 },
+  divider: { width: 1, alignSelf: 'stretch', backgroundColor: '#444', margin: '0 1px', flexShrink: 0 },
   keyboardSection: { borderTop: '2px solid #444', paddingTop: 12, display: 'flex', justifyContent: 'center' },
 };

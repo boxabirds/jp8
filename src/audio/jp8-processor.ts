@@ -26,7 +26,7 @@ let nextEngineId = 0;
 
 const BLOCK_FRAMES = 128;
 const CHANNELS = 2;
-const PARAM_COUNT = 40;
+const PARAM_COUNT = 68;
 const SAB_ACTIVE_VOICES = 0;
 const SAB_SLOTS = 4;
 

@@ -8,7 +8,7 @@ import { loadJP8Wasm } from './wasm-loader';
 
 export type JP8EngineStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-export const PARAM_COUNT = 40;
+export const PARAM_COUNT = 68;
 const TELEMETRY_SAB_BYTES = 16;
 const SAB_ACTIVE_VOICES = 0;
 
@@ -140,6 +140,34 @@ export class JP8Engine {
     p[P.ARP_MODE] = 0;
     p[P.ARP_RANGE] = 1;
     p[P.ARP_TEMPO] = 120;
+    // Extended modules — all off/bypass by default
+    p[P.SOURCE_MODE] = 0;
+    p[P.SPECTRAL_TILT] = 0;
+    p[P.SPECTRAL_PARTIALS] = 32;
+    p[P.SPECTRAL_NOISE] = 0;
+    p[P.SPECTRAL_MORPH] = 0;
+    p[P.SPECTRAL_TARGET] = 0;
+    p[P.WG_EXCITATION] = 0;
+    p[P.WG_BODY] = 0;
+    p[P.WG_BRIGHTNESS] = 0.5;
+    p[P.WG_BODY_MIX] = 0.5;
+    p[P.MODAL_MIX] = 0;          // 0 = full bypass
+    p[P.MODAL_MATERIAL] = 0.5;
+    p[P.MODAL_BODY] = 0;
+    p[P.MODAL_MODES] = 16;
+    p[P.MODAL_INHARMONICITY] = 0;
+    p[P.CHAOS_ENABLE] = 0;
+    p[P.CHAOS_RATE1] = 5;
+    p[P.CHAOS_RATE2] = 7;
+    p[P.CHAOS_DEPTH] = 0;
+    p[P.CHAOS_TO_PITCH] = 0;
+    p[P.CHAOS_TO_FILTER] = 0;
+    p[P.CHAOS_TO_PWM] = 0;
+    p[P.BUBBLE_ENABLE] = 0;
+    p[P.BUBBLE_RATE] = 5;
+    p[P.BUBBLE_MIN_SIZE] = 0.003;
+    p[P.BUBBLE_MAX_SIZE] = 0.01;
+    p[P.BUBBLE_LEVEL] = 0;
   }
 
   // --- Parameter access ---
@@ -208,6 +236,34 @@ export const P = {
   LFO_PWM: 30, LFO_DELAY: 31,
   CHORUS: 32, VOLUME: 33, ASSIGN: 34, PORTAMENTO: 35,
   ARP_MODE: 36, ARP_RANGE: 37, ARP_TEMPO: 38,
+  // Extended synthesis modules
+  SOURCE_MODE: 39,        // 0=BLEP, 1=SPECTRAL, 2=WAVEGUIDE
+  SPECTRAL_TILT: 40,      // -1..+1
+  SPECTRAL_PARTIALS: 41,  // 2-64
+  SPECTRAL_NOISE: 42,     // 0-1
+  SPECTRAL_MORPH: 43,     // 0-1
+  SPECTRAL_TARGET: 44,    // 0-N preset
+  WG_EXCITATION: 45,      // 0-5
+  WG_BODY: 46,            // 0-4
+  WG_BRIGHTNESS: 47,      // 0-1
+  WG_BODY_MIX: 48,        // 0-1
+  MODAL_MIX: 49,          // 0-1 (0=bypass)
+  MODAL_MATERIAL: 50,     // 0-1 (rubber..metal)
+  MODAL_BODY: 51,         // 0-4 preset
+  MODAL_MODES: 52,        // 4-32
+  MODAL_INHARMONICITY: 53,// 0-1
+  CHAOS_ENABLE: 54,       // 0/1
+  CHAOS_RATE1: 55,        // 0.1-30 Hz
+  CHAOS_RATE2: 56,        // 0.1-30 Hz
+  CHAOS_DEPTH: 57,        // 0-1
+  CHAOS_TO_PITCH: 58,     // 0-1
+  CHAOS_TO_FILTER: 59,    // 0-1
+  CHAOS_TO_PWM: 60,       // 0-1
+  BUBBLE_ENABLE: 61,      // 0/1
+  BUBBLE_RATE: 62,        // 0-60
+  BUBBLE_MIN_SIZE: 63,    // 0.001-0.01
+  BUBBLE_MAX_SIZE: 64,    // 0.005-0.03
+  BUBBLE_LEVEL: 65,       // 0-1
 } as const;
 
 export const PARAM_TOTAL = PARAM_COUNT;

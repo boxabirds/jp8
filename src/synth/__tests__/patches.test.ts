@@ -1,10 +1,9 @@
 import { describe, test, expect } from 'vitest';
 import { FACTORY_PATCHES } from '../patches';
-
-const PARAM_COUNT = 40;
+import { PARAM_COUNT, P } from '../../audio/jp8-engine';
 
 describe('Factory Patches', () => {
-  test('all 16 patches have exactly 40 params', () => {
+  test('all 16 patches have exactly 68 params', () => {
     expect(FACTORY_PATCHES).toHaveLength(16);
     for (const patch of FACTORY_PATCHES) {
       expect(patch.params).toHaveLength(PARAM_COUNT);
@@ -23,6 +22,20 @@ describe('Factory Patches', () => {
         expect(Number.isNaN(patch.params[i])).toBe(false);
       }
     }
+  });
+
+  test('P enum has all extended module keys', () => {
+    expect(P.SOURCE_MODE).toBe(39);
+    expect(P.SPECTRAL_TILT).toBe(40);
+    expect(P.WG_EXCITATION).toBe(45);
+    expect(P.MODAL_MIX).toBe(49);
+    expect(P.CHAOS_ENABLE).toBe(54);
+    expect(P.BUBBLE_ENABLE).toBe(61);
+    expect(P.BUBBLE_LEVEL).toBe(65);
+  });
+
+  test('PARAM_COUNT is 68', () => {
+    expect(PARAM_COUNT).toBe(68);
   });
 
   test('params in valid ranges', () => {

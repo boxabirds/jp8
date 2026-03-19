@@ -3,6 +3,7 @@
 
 use crate::allocator::VoiceAllocator;
 use crate::arpeggiator::{ArpMode, Arpeggiator};
+use crate::benjolin::Benjolin;
 use crate::chorus::{ChorusMode, StereoChorus};
 use crate::lfo::{Lfo, LfoWave};
 use crate::params::{EngineParams, PARAM_COUNT};
@@ -17,6 +18,7 @@ pub struct Engine {
     arp: Arpeggiator,
     pub params: EngineParams,
     lfo: Lfo,
+    benjolin: Benjolin,
     sample_rate: f32,
     inv_sample_rate: f32,
 }
@@ -31,6 +33,7 @@ impl Engine {
             arp: Arpeggiator::new(sample_rate),
             params: EngineParams::default_patch(),
             lfo: Lfo::new(),
+            benjolin: Benjolin::new(),
             sample_rate,
             inv_sample_rate: 1.0 / sample_rate,
         }
@@ -89,7 +92,7 @@ impl Engine {
         self.voices.iter().filter(|v| v.is_active()).count() as u32
     }
 
-    /// Apply parameters from SAB float array (40 slots).
+    /// Apply parameters from SAB float array (68 slots).
     pub fn apply_params(&mut self, raw: &[f32; PARAM_COUNT]) {
         self.params.vco1_wave_flags = raw[0] as u8;
         self.params.vco1_range = (raw[1] as i8).clamp(-2, 2);
@@ -130,7 +133,36 @@ impl Engine {
         self.params.arp_mode = raw[36] as u8;
         self.params.arp_range = (raw[37] as u8).clamp(1, 4);
         self.params.arp_tempo = raw[38].clamp(30.0, 300.0);
-        // 39 reserved
+
+        // Extended synthesis modules (indices 39-65)
+        self.params.source_mode = (raw[39] as u8).min(2);
+        self.params.spectral_tilt = raw[40].clamp(-1.0, 1.0);
+        self.params.spectral_partials = (raw[41] as u8).clamp(2, 64);
+        self.params.spectral_noise = raw[42].clamp(0.0, 1.0);
+        self.params.spectral_morph = raw[43].clamp(0.0, 1.0);
+        self.params.spectral_target = raw[44] as u8;
+        self.params.wg_excitation = (raw[45] as u8).min(5);
+        self.params.wg_body = (raw[46] as u8).min(4);
+        self.params.wg_brightness = raw[47].clamp(0.0, 1.0);
+        self.params.wg_body_mix = raw[48].clamp(0.0, 1.0);
+        self.params.modal_mix = raw[49].clamp(0.0, 1.0);
+        self.params.modal_material = raw[50].clamp(0.0, 1.0);
+        self.params.modal_body = (raw[51] as u8).min(4);
+        self.params.modal_modes = (raw[52] as u8).clamp(4, 32);
+        self.params.modal_inharmonicity = raw[53].clamp(0.0, 1.0);
+        self.params.chaos_enable = if raw[54] > 0.5 { 1 } else { 0 };
+        self.params.chaos_rate1 = raw[55].clamp(0.1, 30.0);
+        self.params.chaos_rate2 = raw[56].clamp(0.1, 30.0);
+        self.params.chaos_depth = raw[57].clamp(0.0, 1.0);
+        self.params.chaos_to_pitch = raw[58].clamp(0.0, 1.0);
+        self.params.chaos_to_filter = raw[59].clamp(0.0, 1.0);
+        self.params.chaos_to_pwm = raw[60].clamp(0.0, 1.0);
+        self.params.bubble_enable = if raw[61] > 0.5 { 1 } else { 0 };
+        self.params.bubble_rate = raw[62].clamp(0.0, 60.0);
+        self.params.bubble_min_size = raw[63].clamp(0.001, 0.01);
+        self.params.bubble_max_size = raw[64].clamp(0.005, 0.03);
+        self.params.bubble_level = raw[65].clamp(0.0, 1.0);
+        // 66-67 reserved
 
         // Update envelope parameters on all voices
         for voice in &mut self.voices {
@@ -174,6 +206,13 @@ impl Engine {
             2 => ChorusMode::Mode2,
             _ => ChorusMode::Mode12,
         };
+
+        // Benjolin chaos modulator
+        self.benjolin.set_params(
+            self.params.chaos_rate1,
+            self.params.chaos_rate2,
+            self.params.chaos_depth,
+        );
     }
 
     /// Render stereo interleaved frames.
@@ -204,13 +243,20 @@ impl Engine {
 
         let params = &self.params;
 
+        let chaos_enabled = params.chaos_enable > 0;
+
         for frame in 0..frames {
             let lfo_out = self.lfo.tick(inv_sr);
+            let chaos_out = if chaos_enabled {
+                self.benjolin.tick(inv_sr)
+            } else {
+                0.0
+            };
             let mut mono_sum: f32 = 0.0;
 
             for (i, voice) in self.voices.iter_mut().enumerate() {
                 if voice.is_active() {
-                    let sample = voice.render_sample(inv_sr, params, lfo_out);
+                    let sample = voice.render_sample(inv_sr, params, lfo_out, chaos_out);
                     mono_sum += sample;
                     self.voice_allocator.update_env_level(i, voice.env2.level);
                 }
@@ -253,74 +299,25 @@ mod tests {
     const BLOCK: usize = 128;
     const STEREO_BLOCK: usize = BLOCK * 2;
 
-    /// Factory patch params (copied from patches.ts for Rust-side testing).
-    /// Each is a [f32; 40] matching the SAB layout.
-    const FACTORY_PATCHES: &[[f32; PARAM_COUNT]] = &[
-        // 0: Brass Ensemble
-        [1.0, 0.0, 0.5, 0.8, 1.0, 0.0, 0.5, 0.8, 0.08, 0.0, 0.0, 0.0,
-         2000.0, 0.15, 0.6, 0.5, 20.0, 0.05, 0.2, 0.7, 0.3, 0.0,
-         0.01, 0.1, 0.8, 0.3, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 1: Warm Pad
-        [1.0, 0.0, 0.5, 0.7, 1.0, 0.0, 0.5, 0.7, 0.1, 0.0, 0.0, 0.0,
-         3000.0, 0.2, 0.4, 0.3, 20.0, 0.8, 0.5, 0.8, 1.0, 0.0,
-         0.5, 0.3, 0.9, 0.8, 3.0, 0.0, 0.0, 0.15, 0.0, 0.0, 3.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 2: Bass
-        [1.0, -1.0, 0.5, 0.9, 2.0, -1.0, 0.5, 0.7, 0.05, 0.0, 0.0, 0.5,
-         800.0, 0.3, 0.7, 0.2, 20.0, 0.005, 0.15, 0.3, 0.15, 0.0,
-         0.005, 0.1, 0.7, 0.2, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 3: Strings
-        [1.0, 0.0, 0.5, 0.6, 1.0, 0.0, 0.5, 0.6, 0.12, 0.0, 0.0, 0.0,
-         4000.0, 0.1, 0.3, 0.4, 20.0, 0.5, 0.3, 0.8, 0.8, 0.0,
-         0.4, 0.3, 0.9, 0.6, 4.0, 1.0, 0.0, 0.1, 0.0, 0.0, 3.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 4: Lead
-        [1.0, 0.0, 0.5, 0.9, 1.0, 0.0, 0.3, 0.7, 0.0, 0.15, 0.0, 0.0,
-         5000.0, 0.25, 0.5, 0.5, 20.0, 0.01, 0.2, 0.6, 0.3, 0.0,
-         0.01, 0.15, 0.8, 0.25, 6.0, 0.0, 0.0, 0.0, 0.1, 0.3, 0.0, 0.75, 0.0, 0.1, 0.0, 1.0, 120.0, 0.0],
-        // 5: Sync Lead (approx — uses cross-mod since we don't have sync)
-        [1.0, 0.0, 0.5, 0.8, 1.0, 1.0, 0.5, 0.6, 0.0, 0.4, 0.0, 0.0,
-         6000.0, 0.2, 0.6, 0.5, 20.0, 0.01, 0.2, 0.5, 0.2, 0.0,
-         0.01, 0.1, 0.8, 0.3, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 6: Keys
-        [2.0, 0.0, 0.5, 0.8, 2.0, 0.0, 0.45, 0.6, 0.05, 0.0, 0.0, 0.0,
-         3500.0, 0.1, 0.4, 0.5, 20.0, 0.005, 0.3, 0.5, 0.2, 0.0,
-         0.005, 0.25, 0.6, 0.2, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 7: Ambient Sweep
-        [1.0, 0.0, 0.5, 0.6, 1.0, 0.0, 0.5, 0.6, 0.15, 0.0, 0.1, 0.0,
-         1500.0, 0.4, 0.7, 0.3, 20.0, 1.0, 1.0, 0.7, 2.0, 0.0,
-         0.8, 0.5, 0.9, 1.5, 0.3, 0.0, 0.0, 0.5, 0.2, 1.0, 3.0, 0.6, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 8: Organ
-        [2.0, 0.0, 0.5, 0.7, 2.0, 1.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.3,
-         8000.0, 0.05, 0.2, 0.3, 20.0, 0.005, 0.05, 0.8, 0.1, 0.0,
-         0.005, 0.05, 1.0, 0.1, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 9: Pluck
-        [1.0, 0.0, 0.5, 0.8, 1.0, 0.0, 0.5, 0.5, 0.03, 0.0, 0.05, 0.0,
-         6000.0, 0.15, 0.8, 0.5, 20.0, 0.001, 0.2, 0.0, 0.15, 0.0,
-         0.001, 0.15, 0.0, 0.1, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.75, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 10: Fat Unison
-        [1.0, 0.0, 0.5, 0.7, 1.0, 0.0, 0.5, 0.7, 0.1, 0.0, 0.0, 0.2,
-         3000.0, 0.2, 0.5, 0.4, 20.0, 0.01, 0.2, 0.7, 0.3, 0.0,
-         0.01, 0.15, 0.8, 0.3, 5.0, 0.0, 0.0, 0.1, 0.0, 0.0, 3.0, 0.5, 2.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 11: PWM Strings
-        [2.0, 0.0, 0.5, 0.8, 2.0, 0.0, 0.5, 0.8, 0.08, 0.0, 0.0, 0.0,
-         5000.0, 0.1, 0.3, 0.4, 20.0, 0.4, 0.3, 0.8, 0.7, 0.0,
-         0.3, 0.3, 0.9, 0.5, 2.0, 1.0, 0.0, 0.0, 0.6, 0.0, 3.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 12: Filter Bass
-        [1.0, -1.0, 0.5, 0.9, 1.0, -1.0, 0.5, 0.8, 0.03, 0.0, 0.0, 0.4,
-         400.0, 0.5, 0.9, 0.1, 20.0, 0.001, 0.3, 0.1, 0.2, 0.0,
-         0.001, 0.2, 0.6, 0.15, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 13: Shimmer Pad
-        [1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 0.5, 0.5, 0.2, 0.0, 0.05, 0.0,
-         6000.0, 0.15, 0.3, 0.5, 20.0, 1.0, 0.5, 0.9, 1.5, 0.0,
-         0.8, 0.4, 0.85, 1.0, 1.5, 1.0, 0.0, 0.2, 0.3, 0.5, 3.0, 0.6, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 14: Reso Sweep
-        [1.0, 0.0, 0.5, 0.8, 1.0, 0.0, 0.5, 0.6, 0.1, 0.0, 0.0, 0.0,
-         500.0, 0.7, 0.9, 0.3, 20.0, 0.01, 0.8, 0.4, 0.5, 0.0,
-         0.01, 0.1, 0.8, 0.4, 0.5, 0.0, 0.0, 0.4, 0.0, 0.0, 2.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-        // 15: Noise Hit
-        [0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.9, 0.0,
-         2000.0, 0.5, 0.8, 0.0, 20.0, 0.001, 0.15, 0.0, 0.1, 0.0,
-         0.001, 0.1, 0.0, 0.08, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0, 120.0, 0.0],
-    ];
+    /// Factory patch params — first 39 elements from patches.ts, padded to 68 with zeros.
+    /// Trailing zeros = all extended modules off (source_mode=0, modal_mix=0, chaos_enable=0, etc.)
+    fn pad_patch(base: &[f32]) -> [f32; PARAM_COUNT] {
+        let mut out = [0.0f32; PARAM_COUNT];
+        for (i, &v) in base.iter().enumerate() {
+            out[i] = v;
+        }
+        out
+    }
+
+    fn factory_patches() -> Vec<[f32; PARAM_COUNT]> {
+        let bases: &[&[f32]] = &[
+            &[1.0, 0.0, 0.5, 0.8, 1.0, 0.0, 0.5, 0.8, 0.08, 0.0, 0.0, 0.0, 2000.0, 0.15, 0.6, 0.5, 20.0, 0.05, 0.2, 0.7, 0.3, 0.0, 0.01, 0.1, 0.8, 0.3, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0],
+            &[1.0, 0.0, 0.5, 0.7, 1.0, 0.0, 0.5, 0.7, 0.1, 0.0, 0.0, 0.0, 3000.0, 0.2, 0.4, 0.3, 20.0, 0.8, 0.5, 0.8, 1.0, 0.0, 0.5, 0.3, 0.9, 0.8, 3.0, 0.0, 0.0, 0.15, 0.0, 0.0, 3.0, 0.7, 0.0, 0.0, 0.0, 1.0, 120.0],
+            &[1.0, -1.0, 0.5, 0.9, 2.0, -1.0, 0.5, 0.7, 0.05, 0.0, 0.0, 0.5, 800.0, 0.3, 0.7, 0.2, 20.0, 0.005, 0.15, 0.3, 0.15, 0.0, 0.005, 0.1, 0.7, 0.2, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0, 120.0],
+            &[0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.9, 0.0, 2000.0, 0.5, 0.8, 0.0, 20.0, 0.001, 0.15, 0.0, 0.1, 0.0, 0.001, 0.1, 0.0, 0.08, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0, 120.0],
+        ];
+        bases.iter().map(|b| pad_patch(b)).collect()
+    }
 
     fn render_blocks(engine: &mut Engine, blocks: usize) -> Vec<f32> {
         let mut all = Vec::new();
@@ -389,6 +386,28 @@ mod tests {
     }
 
     #[test]
+    fn apply_params_clamps_extended() {
+        let mut engine = Engine::new(SR);
+        let mut raw = [0.0f32; PARAM_COUNT];
+        // Out-of-range values for new params
+        raw[39] = 99.0;   // source_mode → clamp to 2
+        raw[40] = -5.0;   // spectral_tilt → clamp to -1
+        raw[41] = 200.0;  // spectral_partials → clamp to 64
+        raw[52] = -5.0;   // modal_modes → clamp to 4
+        raw[54] = 5.0;    // chaos_enable → 1 (>0.5)
+        raw[55] = 100.0;  // chaos_rate1 → clamp to 30
+        raw[62] = -10.0;  // bubble_rate → clamp to 0
+        engine.apply_params(&raw);
+        assert!(engine.params.source_mode <= 2);
+        assert_eq!(engine.params.spectral_tilt, -1.0);
+        assert_eq!(engine.params.spectral_partials, 64);
+        assert_eq!(engine.params.modal_modes, 4);
+        assert_eq!(engine.params.chaos_enable, 1);
+        assert_eq!(engine.params.chaos_rate1, 30.0);
+        assert_eq!(engine.params.bubble_rate, 0.0);
+    }
+
+    #[test]
     fn all_notes_off_silences() {
         let mut engine = Engine::new(SR);
         engine.params.env2_release = 0.01;
@@ -448,7 +467,7 @@ mod tests {
 
     #[test]
     fn no_nan_all_factory_patches() {
-        for (i, patch) in FACTORY_PATCHES.iter().enumerate() {
+        for (i, patch) in factory_patches().iter().enumerate() {
             let mut engine = Engine::new(SR);
             engine.apply_params(patch);
             engine.note_on(60, 100);
@@ -518,7 +537,35 @@ mod tests {
         raw[36] = p.arp_mode as f32;
         raw[37] = p.arp_range as f32;
         raw[38] = p.arp_tempo;
-        raw[39] = 0.0;
+        // Extended modules
+        raw[39] = p.source_mode as f32;
+        raw[40] = p.spectral_tilt;
+        raw[41] = p.spectral_partials as f32;
+        raw[42] = p.spectral_noise;
+        raw[43] = p.spectral_morph;
+        raw[44] = p.spectral_target as f32;
+        raw[45] = p.wg_excitation as f32;
+        raw[46] = p.wg_body as f32;
+        raw[47] = p.wg_brightness;
+        raw[48] = p.wg_body_mix;
+        raw[49] = p.modal_mix;
+        raw[50] = p.modal_material;
+        raw[51] = p.modal_body as f32;
+        raw[52] = p.modal_modes as f32;
+        raw[53] = p.modal_inharmonicity;
+        raw[54] = p.chaos_enable as f32;
+        raw[55] = p.chaos_rate1;
+        raw[56] = p.chaos_rate2;
+        raw[57] = p.chaos_depth;
+        raw[58] = p.chaos_to_pitch;
+        raw[59] = p.chaos_to_filter;
+        raw[60] = p.chaos_to_pwm;
+        raw[61] = p.bubble_enable as f32;
+        raw[62] = p.bubble_rate;
+        raw[63] = p.bubble_min_size;
+        raw[64] = p.bubble_max_size;
+        raw[65] = p.bubble_level;
+        // 66-67 reserved (already 0.0)
         raw
     }
 }
