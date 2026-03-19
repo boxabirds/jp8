@@ -8,6 +8,7 @@
 ///  - ENV-1→VCA optional routing
 ///  - Global LFO output passed in from engine (not per-voice)
 
+use crate::bubble::BubbleOscillator;
 use crate::envelope::Envelope;
 use crate::filter::{HighPass, IR3109};
 use crate::oscillator::{NoiseGen, Oscillator};
@@ -17,6 +18,7 @@ pub struct Voice {
     pub vco1: Oscillator,
     pub vco2: Oscillator,
     pub noise: NoiseGen,
+    pub bubble: BubbleOscillator,
     pub filter: IR3109,
     pub hpf: HighPass,
     pub env1: Envelope,     // → filter cutoff (optionally VCA)
@@ -36,6 +38,7 @@ impl Voice {
             vco1: Oscillator::new(),
             vco2: Oscillator::new(),
             noise: NoiseGen::new(42 + voice_index as u32 * 7),
+            bubble: BubbleOscillator::new(sample_rate),
             filter: IR3109::new(sample_rate),
             hpf: HighPass::new(sample_rate),
             env1: Envelope::new(sample_rate),
@@ -79,6 +82,12 @@ impl Voice {
         self.env2.gate_on();
         self.filter.reset();
         self.hpf.reset();
+
+        // Trigger note-based bubbles if enabled
+        if params.bubble_enable > 0 && params.bubble_level > 0.0 {
+            self.bubble.set_params(params.bubble_rate, params.bubble_min_size, params.bubble_max_size);
+            self.bubble.trigger_note(freq, self.velocity);
+        }
 
         // Reset LFO delay — ramps from 0 to 1
         self.lfo_delay_level = 0.0;
@@ -135,12 +144,20 @@ impl Voice {
         // Sub-oscillator (VCO1, one octave below, square)
         let sub_out = self.vco1.sub_oscillator() * params.sub_osc_level;
 
+        // Bubble oscillator (ticks continuously for ambient, plus note-triggered)
+        let bubble_out = if params.bubble_enable > 0 && params.bubble_level > 0.0 {
+            self.bubble.tick() * params.bubble_level
+        } else {
+            0.0
+        };
+
         // Mixer
         let noise_out = self.noise.next();
         let mix = vco1_out * params.vco1_level
             + vco2_out * params.vco2_level
             + sub_out
-            + noise_out * params.noise_level;
+            + noise_out * params.noise_level
+            + bubble_out;
 
         // ENV-1 → filter cutoff modulation
         let env1_out = self.env1.tick();

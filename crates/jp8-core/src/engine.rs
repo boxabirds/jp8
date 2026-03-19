@@ -287,11 +287,6 @@ impl Engine {
                 }
             }
 
-            // Bubble oscillator (additive mixer source)
-            if params.bubble_enable > 0 && params.bubble_level > 0.0 {
-                mono_sum += self.bubble.tick() * params.bubble_level;
-            }
-
             // Modal resonator (post-filter effect, dry/wet mix)
             let modal_input = if params.modal_mix > 0.0 {
                 let resonated = self.modal.tick(mono_sum);
