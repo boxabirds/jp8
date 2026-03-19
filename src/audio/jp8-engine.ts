@@ -133,7 +133,7 @@ export class JP8Engine {
     p[P.LFO_FILTER] = 0;
     p[P.LFO_PWM] = 0;
     p[P.LFO_DELAY] = 0;
-    p[P.CHORUS] = 3;
+    p[P.CHORUS] = 0;  // off by default — enable per patch
     p[P.VOLUME] = 0.7;
     p[P.ASSIGN] = 0;
     p[P.PORTAMENTO] = 0;

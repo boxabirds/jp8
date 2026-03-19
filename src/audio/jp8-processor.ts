@@ -1,24 +1,30 @@
 /**
  * JP-8 AudioWorklet Processor.
- * Follows POC10 pattern: WASM engine runs entirely inside the worklet.
- * SAB for parameter transport + telemetry. postMessage for notes only.
+ *
+ * Zero-copy rendering: WASM owns the output buffer in linear memory.
+ * JS reads directly from it via a Float32Array view — no wasm-bindgen copy-back.
  */
 
 import init, {
   init_engine,
-  render_block,
+  render,
+  get_output_ptr,
+  get_output_len,
+  get_param_ptr,
+  apply_params_from_buf,
   note_on,
   note_off,
   all_notes_off,
-  apply_params,
   get_active_voice_count,
 } from '@jp8-wasm/jp8_wasm.js';
+
+// Will be set after init() — the WASM instance's linear memory
+let wasmMemory: WebAssembly.Memory;
 
 const BLOCK_FRAMES = 128;
 const CHANNELS = 2;
 const PARAM_COUNT = 40;
 
-// SAB telemetry layout
 const SAB_ACTIVE_VOICES = 0;
 const SAB_SLOTS = 4;
 
@@ -30,10 +36,10 @@ type Command =
 class JP8Processor extends AudioWorkletProcessor {
   private engineReady = false;
   private pendingCommands: Command[] = [];
-  private blockBuffer: Float32Array;
+  private outputView: Float32Array | null = null;
+  private paramWasmView: Float32Array | null = null;
   private sabInt32: Int32Array | null = null;
-  private paramView: Float32Array | null = null;
-  private paramSnapshot: Float32Array;
+  private paramSabView: Float32Array | null = null;
 
   constructor(options: AudioWorkletProcessorOptions) {
     super();
@@ -44,14 +50,11 @@ class JP8Processor extends AudioWorkletProcessor {
       paramSab: SharedArrayBuffer;
     };
 
-    this.blockBuffer = new Float32Array(BLOCK_FRAMES * CHANNELS);
-    this.paramSnapshot = new Float32Array(PARAM_COUNT);
-
     if (telemetrySab) {
       this.sabInt32 = new Int32Array(telemetrySab, 0, SAB_SLOTS);
     }
     if (paramSab) {
-      this.paramView = new Float32Array(paramSab);
+      this.paramSabView = new Float32Array(paramSab);
     }
 
     this.initEngine(wasmModule);
@@ -68,8 +71,18 @@ class JP8Processor extends AudioWorkletProcessor {
 
   private async initEngine(wasmModule: WebAssembly.Module): Promise<void> {
     try {
-      await init({ module_or_path: wasmModule });
+      const wasm = await init({ module_or_path: wasmModule });
+      wasmMemory = wasm.memory;
       init_engine(sampleRate);
+
+      // Get pointers to pre-allocated buffers in WASM linear memory — zero copy
+      const outputPtr = get_output_ptr() as unknown as number;
+      const outputLen = get_output_len();
+      this.outputView = new Float32Array(wasmMemory.buffer, outputPtr, outputLen);
+
+      const paramPtr = get_param_ptr() as unknown as number;
+      this.paramWasmView = new Float32Array(wasmMemory.buffer, paramPtr, PARAM_COUNT);
+
       this.engineReady = true;
 
       for (const cmd of this.pendingCommands) {
@@ -98,29 +111,39 @@ class JP8Processor extends AudioWorkletProcessor {
   }
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
-    if (!this.engineReady) {
+    if (!this.engineReady || !this.outputView || !this.paramWasmView) {
       const out = outputs[0];
       if (out) for (const ch of out) ch.fill(0);
       return true;
     }
 
-    // Read params from SAB and apply to engine
-    if (this.paramView) {
-      this.paramSnapshot.set(this.paramView);
-      apply_params(this.paramSnapshot);
+    // Refresh views if WASM memory grew (defensive — shouldn't happen in render path)
+    if (this.outputView.buffer !== wasmMemory.buffer) {
+      const outputPtr = get_output_ptr() as unknown as number;
+      const outputLen = get_output_len();
+      this.outputView = new Float32Array(wasmMemory.buffer, outputPtr, outputLen);
+      const paramPtr = get_param_ptr() as unknown as number;
+      this.paramWasmView = new Float32Array(wasmMemory.buffer, paramPtr, PARAM_COUNT);
     }
 
-    // Render interleaved stereo
-    render_block(this.blockBuffer);
+    // Copy SAB params → WASM param buffer, then apply
+    if (this.paramSabView) {
+      this.paramWasmView.set(this.paramSabView);
+      apply_params_from_buf();
+    }
 
-    // Deinterleave to output channels
+    // Render into WASM-owned buffer (zero copy)
+    render();
+
+    // Deinterleave from WASM memory directly to Web Audio output
     const out = outputs[0];
     if (out && out.length >= CHANNELS) {
       const left = out[0];
       const right = out[1];
+      const buf = this.outputView;
       for (let i = 0; i < BLOCK_FRAMES; i++) {
-        left[i] = this.blockBuffer[i * CHANNELS];
-        right[i] = this.blockBuffer[i * CHANNELS + 1];
+        left[i] = buf[i * CHANNELS];
+        right[i] = buf[i * CHANNELS + 1];
       }
     }
 

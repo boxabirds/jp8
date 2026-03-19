@@ -270,10 +270,14 @@ export class JP8Rack {
 
   // --- MIDI routing ---
 
-  /** Route a MIDI note-on to the appropriate instance(s). */
+  /**
+   * Route a MIDI note-on to the appropriate instance(s).
+   * midiChannel 0 (OMNI) = active instance only.
+   * Specific channel (1-16) = always receives that channel regardless of focus.
+   */
   routeNoteOn(midiChannel: number, note: number, velocity: number) {
     for (const inst of this.instances.values()) {
-      if (inst.channel.midiChannel === 0 || inst.channel.midiChannel === midiChannel + 1) {
+      if (this.shouldReceiveMidi(inst, midiChannel)) {
         inst.engine.noteOn(note, velocity);
       }
     }
@@ -281,27 +285,33 @@ export class JP8Rack {
 
   routeNoteOff(midiChannel: number, note: number) {
     for (const inst of this.instances.values()) {
-      if (inst.channel.midiChannel === 0 || inst.channel.midiChannel === midiChannel + 1) {
+      if (this.shouldReceiveMidi(inst, midiChannel)) {
         inst.engine.noteOff(note);
       }
     }
   }
 
   routeCC(midiChannel: number, cc: number, value: number) {
-    // Route CC to matching instances — handled by caller (midi.ts)
     for (const inst of this.instances.values()) {
-      if (inst.channel.midiChannel === 0 || inst.channel.midiChannel === midiChannel + 1) {
-        // CC handling is param-specific, delegate to engine
+      if (this.shouldReceiveMidi(inst, midiChannel)) {
         const normalized = value / 127;
         switch (cc) {
-          case 1: inst.engine.setParam(28, normalized); break; // Mod wheel → LFO pitch
-          case 7: inst.engine.setParam(33, normalized); break; // Volume
-          case 74: inst.engine.setParam(12, 20 + normalized * 19980); break; // Cutoff
-          case 71: inst.engine.setParam(13, normalized); break; // Reso
+          case 1: inst.engine.setParam(28, normalized); break;
+          case 7: inst.engine.setParam(33, normalized); break;
+          case 74: inst.engine.setParam(12, 20 + normalized * 19980); break;
+          case 71: inst.engine.setParam(13, normalized); break;
           case 123: inst.engine.allNotesOff(); break;
         }
       }
     }
+  }
+
+  /** OMNI (0) = only when this instance is active. 1-16 = always for that channel. */
+  private shouldReceiveMidi(inst: RackInstance, incomingChannel: number): boolean {
+    if (inst.channel.midiChannel === 0) {
+      return inst.id === this.activeId;
+    }
+    return inst.channel.midiChannel === incomingChannel + 1;
   }
 
   // --- Lifecycle ---

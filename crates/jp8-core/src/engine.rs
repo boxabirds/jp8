@@ -182,10 +182,8 @@ impl Engine {
         let inv_sr = self.inv_sample_rate;
 
         // Collect arp events for entire block first (avoids borrow conflicts)
-        // Max events per block: one per sample is overkill, but safe
         const MAX_ARP_EVENTS: usize = 8;
         let mut arp_events: [(u8, u8); MAX_ARP_EVENTS] = [(0, 0); MAX_ARP_EVENTS];
-        let mut arp_event_frames: [usize; MAX_ARP_EVENTS] = [0; MAX_ARP_EVENTS];
         let mut arp_event_count = 0;
 
         if self.arp.is_active() {
@@ -193,13 +191,11 @@ impl Engine {
                 let (on, off) = self.arp.tick();
                 if (on > 0 || off > 0) && arp_event_count < MAX_ARP_EVENTS {
                     arp_events[arp_event_count] = (on, off);
-                    arp_event_frames[arp_event_count] = frame;
                     arp_event_count += 1;
                 }
             }
         }
 
-        // Apply arp events (triggers/releases voices)
         for i in 0..arp_event_count {
             let (on, off) = arp_events[i];
             if off > 0 { self.release_voice(off); }
@@ -226,6 +222,25 @@ impl Engine {
             let idx = frame * 2;
             output[idx] = left * vol;
             output[idx + 1] = right * vol;
+        }
+    }
+
+    /// Test tone: pure 440 Hz sine, bypasses all DSP. For debugging audio path.
+    pub fn render_test_tone(&mut self, output: &mut [f32]) {
+        let frames = output.len() / 2;
+        let inv_sr = self.inv_sample_rate;
+        static mut TEST_PHASE: f32 = 0.0;
+
+        for frame in 0..frames {
+            let phase = unsafe { TEST_PHASE };
+            let sample = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let idx = frame * 2;
+            output[idx] = sample;
+            output[idx + 1] = sample;
+            unsafe {
+                TEST_PHASE += 440.0 * inv_sr;
+                if TEST_PHASE >= 1.0 { TEST_PHASE -= 1.0; }
+            }
         }
     }
 }
