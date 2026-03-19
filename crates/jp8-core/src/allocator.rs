@@ -106,3 +106,138 @@ impl VoiceAllocator {
         self.voices_active = [false; MAX_VOICES];
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poly8_allocates_sequentially() {
+        let mut alloc = VoiceAllocator::new();
+        let mut indices: Vec<usize> = Vec::new();
+        for note in 60..68 {
+            indices.push(alloc.note_on(note));
+        }
+        indices.sort();
+        indices.dedup();
+        assert_eq!(indices.len(), 8, "Should allocate 8 unique voices");
+    }
+
+    #[test]
+    fn poly8_steals_lowest_env() {
+        let mut alloc = VoiceAllocator::new();
+        // Fill all 8 voices
+        for note in 60..68 {
+            alloc.note_on(note);
+        }
+        // Set env levels — voice 3 has lowest
+        for i in 0..8 {
+            alloc.update_env_level(i, if i == 3 { 0.01 } else { 0.5 });
+        }
+        // 9th note should steal voice 3
+        let stolen = alloc.note_on(80);
+        assert_eq!(stolen, 3, "Should steal voice with lowest env level");
+    }
+
+    #[test]
+    fn poly4_only_four_voices() {
+        let mut alloc = VoiceAllocator::new();
+        alloc.mode = AssignMode::Poly4;
+        let mut indices: Vec<usize> = Vec::new();
+        for note in 60..64 {
+            indices.push(alloc.note_on(note));
+        }
+        for &idx in &indices {
+            assert!(idx < 4, "Poly4 should only use voices 0-3, got {idx}");
+        }
+    }
+
+    #[test]
+    fn unison_all_voices_same_note() {
+        let mut alloc = VoiceAllocator::new();
+        alloc.mode = AssignMode::Unison;
+        alloc.note_on(60);
+        for i in 0..8 {
+            assert!(alloc.voices_active[i], "Voice {i} should be active in unison");
+            assert_eq!(alloc.voices_note[i], 60);
+        }
+    }
+
+    #[test]
+    fn solo_same_as_unison() {
+        let mut alloc = VoiceAllocator::new();
+        alloc.mode = AssignMode::Solo;
+        alloc.note_on(72);
+        for i in 0..8 {
+            assert!(alloc.voices_active[i]);
+            assert_eq!(alloc.voices_note[i], 72);
+        }
+    }
+
+    #[test]
+    fn note_off_releases_correct() {
+        let mut alloc = VoiceAllocator::new();
+        alloc.note_on(60);
+        alloc.note_on(64);
+        let mut released = [0usize; 8];
+        let count = alloc.note_off(60, &mut released);
+        assert_eq!(count, 1);
+        assert!(!alloc.voices_active[released[0]]);
+    }
+
+    #[test]
+    fn note_off_unison_releases_all() {
+        let mut alloc = VoiceAllocator::new();
+        alloc.mode = AssignMode::Unison;
+        alloc.note_on(60);
+        let mut released = [0usize; 8];
+        let count = alloc.note_off(60, &mut released);
+        assert_eq!(count, 8, "Unison note_off should release all 8 voices");
+    }
+
+    #[test]
+    fn all_off_clears_all() {
+        let mut alloc = VoiceAllocator::new();
+        for note in 60..68 {
+            alloc.note_on(note);
+        }
+        alloc.all_off();
+        for i in 0..8 {
+            assert!(!alloc.voices_active[i]);
+        }
+    }
+
+    #[test]
+    fn round_robin_wraps() {
+        let mut alloc = VoiceAllocator::new();
+        // Fill and release, then fill again — should wrap around
+        for note in 60..68 {
+            alloc.note_on(note);
+        }
+        alloc.all_off();
+        // Second round should still allocate successfully
+        for note in 70..78 {
+            let idx = alloc.note_on(note);
+            assert!(idx < 8);
+        }
+    }
+
+    #[test]
+    fn env_level_tracking() {
+        let mut alloc = VoiceAllocator::new();
+        alloc.update_env_level(5, 0.42);
+        // Fill all voices
+        for note in 60..68 {
+            alloc.note_on(note);
+        }
+        // Voice 5 has level 0.42, others default 0.0
+        // But other voices were just allocated — their env_level is still 0
+        // So steal should pick one of the 0-level voices (not voice 5)
+        alloc.update_env_level(5, 0.42);
+        for i in 0..8 {
+            if i != 5 { alloc.update_env_level(i, 0.8); }
+        }
+        let stolen = alloc.note_on(80);
+        assert_eq!(stolen, 5, "Should steal voice with lowest env level (0.42)");
+    }
+}

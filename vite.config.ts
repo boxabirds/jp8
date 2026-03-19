@@ -4,6 +4,9 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    exclude: ['tests/**', 'node_modules/**'],
+  },
   server: {
     headers: {
       'Cross-Origin-Embedder-Policy': 'require-corp',

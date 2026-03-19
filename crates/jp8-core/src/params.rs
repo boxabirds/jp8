@@ -2,6 +2,7 @@
 /// Expanded from spec §5.1 to include HPF, sub-osc, LFO delay, ENV1→VCA.
 /// wave_flags: bit0=saw, bit1=pulse (additive mixing, not selector).
 
+#[derive(Clone)]
 pub struct EngineParams {
     // VCO-1
     pub vco1_wave_flags: u8,    // bit0=saw, bit1=pulse
@@ -102,3 +103,44 @@ impl EngineParams {
 
 /// SAB parameter count. Expanded from 32 to 40 for new controls.
 pub const PARAM_COUNT: usize = 40;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_patch_in_range() {
+        let p = EngineParams::default_patch();
+        assert!(p.vco1_pw >= 0.05 && p.vco1_pw <= 0.95);
+        assert!(p.vco1_level >= 0.0 && p.vco1_level <= 1.0);
+        assert!(p.vco2_pw >= 0.05 && p.vco2_pw <= 0.95);
+        assert!(p.vco2_level >= 0.0 && p.vco2_level <= 1.0);
+        assert!(p.vco2_detune >= -1.0 && p.vco2_detune <= 1.0);
+        assert!(p.cross_mod >= 0.0 && p.cross_mod <= 1.0);
+        assert!(p.noise_level >= 0.0 && p.noise_level <= 1.0);
+        assert!(p.sub_osc_level >= 0.0 && p.sub_osc_level <= 1.0);
+        assert!(p.filter_cutoff >= 20.0 && p.filter_cutoff <= 20000.0);
+        assert!(p.filter_resonance >= 0.0 && p.filter_resonance <= 1.0);
+        assert!(p.filter_env_depth >= -1.0 && p.filter_env_depth <= 1.0);
+        assert!(p.filter_key_track >= 0.0 && p.filter_key_track <= 1.0);
+        assert!(p.hpf_cutoff >= 20.0 && p.hpf_cutoff <= 20000.0);
+        assert!(p.env1_attack >= 0.001);
+        assert!(p.env1_decay >= 0.001);
+        assert!(p.env1_sustain >= 0.0 && p.env1_sustain <= 1.0);
+        assert!(p.env1_release >= 0.001);
+        assert!(p.env2_attack >= 0.001);
+        assert!(p.env2_decay >= 0.001);
+        assert!(p.env2_sustain >= 0.0 && p.env2_sustain <= 1.0);
+        assert!(p.env2_release >= 0.001);
+        assert!(p.lfo_rate >= 0.1 && p.lfo_rate <= 30.0);
+        assert!(p.master_volume >= 0.0 && p.master_volume <= 1.0);
+        assert!(p.portamento >= 0.0 && p.portamento <= 5.0);
+        assert!(p.arp_range >= 1 && p.arp_range <= 4);
+        assert!(p.arp_tempo >= 30.0 && p.arp_tempo <= 300.0);
+    }
+
+    #[test]
+    fn param_count_is_40() {
+        assert_eq!(PARAM_COUNT, 40);
+    }
+}

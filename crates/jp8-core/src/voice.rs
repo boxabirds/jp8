@@ -176,3 +176,170 @@ impl Voice {
 fn midi_to_hz(note: u8) -> f32 {
     440.0 * 2.0f32.powf((note as f32 - 69.0) / 12.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+    const INV_SR: f32 = 1.0 / 44100.0;
+
+    fn default_params() -> EngineParams {
+        EngineParams::default_patch()
+    }
+
+    #[test]
+    fn silent_when_inactive() {
+        let mut v = Voice::new(SR, 0);
+        let params = default_params();
+        for _ in 0..100 {
+            assert_eq!(v.render_sample(INV_SR, &params, 0.0), 0.0);
+        }
+    }
+
+    #[test]
+    fn produces_audio_after_note_on() {
+        let mut v = Voice::new(SR, 0);
+        let params = default_params();
+        v.note_on(60, 100, &params);
+        let mut has_nonzero = false;
+        for _ in 0..441 {
+            if v.render_sample(INV_SR, &params, 0.0).abs() > 1e-6 {
+                has_nonzero = true;
+                break;
+            }
+        }
+        assert!(has_nonzero, "Voice should produce audio after note_on");
+    }
+
+    #[test]
+    fn note_off_eventually_silences() {
+        let mut v = Voice::new(SR, 0);
+        let mut params = default_params();
+        params.env2_release = 0.05; // short release
+        params.chorus_mode = 0; // chorus off to avoid delay tail
+        v.note_on(60, 100, &params);
+        // Play for a bit
+        for _ in 0..4410 {
+            v.render_sample(INV_SR, &params, 0.0);
+        }
+        v.note_off();
+        // Should silence within release time + generous margin
+        // env2 release coeff targets ~0.001 after release_time
+        for _ in 0..(SR as usize) {
+            v.render_sample(INV_SR, &params, 0.0);
+        }
+        assert!(!v.is_active(), "Voice should be inactive after sufficient release time");
+    }
+
+    #[test]
+    fn velocity_scales_output() {
+        let params = default_params();
+
+        let mut v_loud = Voice::new(SR, 0);
+        v_loud.note_on(60, 127, &params);
+        let mut rms_loud = 0.0f32;
+        for _ in 0..4410 {
+            let s = v_loud.render_sample(INV_SR, &params, 0.0);
+            rms_loud += s * s;
+        }
+
+        let mut v_quiet = Voice::new(SR, 1);
+        v_quiet.note_on(60, 30, &params);
+        let mut rms_quiet = 0.0f32;
+        for _ in 0..4410 {
+            let s = v_quiet.render_sample(INV_SR, &params, 0.0);
+            rms_quiet += s * s;
+        }
+
+        assert!(rms_loud > rms_quiet, "vel=127 should be louder than vel=30");
+    }
+
+    #[test]
+    fn env1_to_vca_reduces_output() {
+        let mut params_off = default_params();
+        params_off.env1_to_vca = false;
+        params_off.env1_sustain = 0.3;
+
+        let mut params_on = params_off.clone();
+        params_on.env1_to_vca = true;
+
+        let mut v1 = Voice::new(SR, 0);
+        v1.note_on(60, 100, &params_off);
+        let mut rms_off = 0.0f32;
+        // Reach sustain
+        for _ in 0..22050 {
+            let s = v1.render_sample(INV_SR, &params_off, 0.0);
+            rms_off += s * s;
+        }
+
+        let mut v2 = Voice::new(SR, 1);
+        v2.note_on(60, 100, &params_on);
+        let mut rms_on = 0.0f32;
+        for _ in 0..22050 {
+            let s = v2.render_sample(INV_SR, &params_on, 0.0);
+            rms_on += s * s;
+        }
+
+        assert!(rms_on < rms_off, "env1_to_vca with low sustain should reduce output");
+    }
+
+    #[test]
+    fn cross_mod_changes_timbre() {
+        let mut params_no_xmod = default_params();
+        params_no_xmod.cross_mod = 0.0;
+
+        let mut params_xmod = default_params();
+        params_xmod.cross_mod = 0.5;
+
+        let mut v1 = Voice::new(SR, 0);
+        v1.note_on(60, 100, &params_no_xmod);
+        let mut rms1 = 0.0f32;
+        for _ in 0..4410 {
+            let s = v1.render_sample(INV_SR, &params_no_xmod, 0.0);
+            rms1 += s * s;
+        }
+
+        let mut v2 = Voice::new(SR, 1);
+        v2.note_on(60, 100, &params_xmod);
+        let mut rms2 = 0.0f32;
+        for _ in 0..4410 {
+            let s = v2.render_sample(INV_SR, &params_xmod, 0.0);
+            rms2 += s * s;
+        }
+
+        assert!((rms1 - rms2).abs() > 0.001, "Cross-mod should change timbre (RMS differs)");
+    }
+
+    #[test]
+    fn lfo_delay_ramps() {
+        let mut params = default_params();
+        params.lfo_delay = 1.0;
+        params.lfo_pitch_depth = 1.0;
+
+        let mut v = Voice::new(SR, 0);
+        v.note_on(60, 100, &params);
+
+        // At sample 0, LFO delay level should be 0 (no LFO effect)
+        let _s0 = v.render_sample(INV_SR, &params, 1.0);
+
+        // After 1 second worth of samples, LFO delay should be ~1.0
+        for _ in 1..44100 {
+            v.render_sample(INV_SR, &params, 1.0);
+        }
+        // The lfo_delay_level should be close to 1.0 now
+        assert!(v.lfo_delay_level > 0.95, "LFO delay should ramp to ~1.0 after delay time");
+    }
+
+    #[test]
+    fn no_nan_full_chain() {
+        let params = default_params();
+        let mut v = Voice::new(SR, 0);
+        v.note_on(60, 100, &params);
+        for _ in 0..44100 {
+            let s = v.render_sample(INV_SR, &params, 0.5);
+            assert!(!s.is_nan(), "Voice produced NaN");
+            assert!(!s.is_infinite(), "Voice produced Inf");
+        }
+    }
+}

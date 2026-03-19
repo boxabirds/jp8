@@ -40,6 +40,9 @@ export function RackView() {
     await rack.start();
     refreshInstances();
 
+    // Expose rack for E2E test hooks
+    (window as any).__jp8_rack = rack;
+
     // Set up MIDI routing to rack
     setupMIDI(rack);
   }, [refreshInstances]);

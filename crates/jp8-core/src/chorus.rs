@@ -144,3 +144,127 @@ impl StereoChorus {
         self.lfo_phase_2 = 0.25;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    fn make_chorus(mode: ChorusMode) -> StereoChorus {
+        let mut c = StereoChorus::new(SR);
+        c.mode = mode;
+        c
+    }
+
+    #[test]
+    fn off_passthrough() {
+        let mut c = make_chorus(ChorusMode::Off);
+        let (l, r) = c.tick(0.5);
+        assert_eq!(l, 0.5);
+        assert_eq!(r, 0.5);
+    }
+
+    #[test]
+    fn mode1_stereo_spread() {
+        let mut c = make_chorus(ChorusMode::Mode1);
+        // Feed varying signal so delay line has content to modulate
+        for i in 0..10000 {
+            let input = (i as f32 * 0.1).sin();
+            c.tick(input);
+        }
+        let mut found_diff = false;
+        for i in 0..10000 {
+            let input = (i as f32 * 0.1).sin();
+            let (l, r) = c.tick(input);
+            if (l - r).abs() > 0.001 {
+                found_diff = true;
+                break;
+            }
+        }
+        assert!(found_diff, "Mode1 should produce stereo difference");
+    }
+
+    #[test]
+    fn mode2_wider_than_mode1() {
+        let mut c1 = make_chorus(ChorusMode::Mode1);
+        let mut c2 = make_chorus(ChorusMode::Mode2);
+
+        let mut diff1 = 0.0f32;
+        let mut diff2 = 0.0f32;
+        for _ in 0..10000 {
+            let (l, r) = c1.tick(0.5);
+            diff1 += (l - r).abs();
+            let (l, r) = c2.tick(0.5);
+            diff2 += (l - r).abs();
+        }
+        assert!(diff2 > diff1, "Mode2 should have wider stereo than Mode1");
+    }
+
+    #[test]
+    fn mode12_combined() {
+        let mut c1 = make_chorus(ChorusMode::Mode1);
+        let mut c2 = make_chorus(ChorusMode::Mode2);
+        let mut c12 = make_chorus(ChorusMode::Mode12);
+
+        // Mode12 output should differ from both Mode1 and Mode2
+        let mut out1 = Vec::new();
+        let mut out2 = Vec::new();
+        let mut out12 = Vec::new();
+        for _ in 0..1000 {
+            out1.push(c1.tick(0.5));
+            out2.push(c2.tick(0.5));
+            out12.push(c12.tick(0.5));
+        }
+        let differs_from_1 = out12.iter().zip(&out1).any(|((l12, _), (l1, _))| (l12 - l1).abs() > 0.001);
+        let differs_from_2 = out12.iter().zip(&out2).any(|((l12, _), (l2, _))| (l12 - l2).abs() > 0.001);
+        assert!(differs_from_1, "Mode12 should differ from Mode1");
+        assert!(differs_from_2, "Mode12 should differ from Mode2");
+    }
+
+    #[test]
+    fn silence_in_silence_out() {
+        let mut c = make_chorus(ChorusMode::Mode12);
+        for _ in 0..1000 {
+            let (l, r) = c.tick(0.0);
+            assert!(l.abs() < 1e-6 && r.abs() < 1e-6, "Should be silent: ({l}, {r})");
+        }
+    }
+
+    #[test]
+    fn no_nan_long_run() {
+        let mut c = make_chorus(ChorusMode::Mode12);
+        for i in 0..100_000 {
+            let input = (i as f32 * 0.01).sin();
+            let (l, r) = c.tick(input);
+            assert!(!l.is_nan() && !r.is_nan(), "NaN at sample {i}");
+            assert!(!l.is_infinite() && !r.is_infinite(), "Inf at sample {i}");
+        }
+    }
+
+    #[test]
+    fn reset_clears_buffers() {
+        let mut c = make_chorus(ChorusMode::Mode1);
+        for _ in 0..1000 {
+            c.tick(1.0);
+        }
+        c.reset();
+        // After reset, buffers are zeroed, so output from zero input should be ~0
+        for _ in 0..100 {
+            let (l, r) = c.tick(0.0);
+            assert!(l.abs() < 1e-6 && r.abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn output_bounded() {
+        let mut c = make_chorus(ChorusMode::Mode12);
+        let input_peak = 1.0;
+        let mut max_out = 0.0f32;
+        for _ in 0..100_000 {
+            let (l, r) = c.tick(input_peak);
+            max_out = max_out.max(l.abs()).max(r.abs());
+        }
+        assert!(max_out < 2.0 * input_peak, "Output should not exceed 2x input, got {max_out}");
+    }
+}

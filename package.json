@@ -7,7 +7,15 @@
     "dev": "lsof -ti :5173 | xargs kill -9 2>/dev/null; bunx vite",
     "build": "bunx vite build",
     "preview": "lsof -ti :4173 | xargs kill -9 2>/dev/null; bunx vite preview",
-    "test:e2e": "npx playwright test --headed"
+    "test:unit": "bunx vitest run",
+    "test:unit:watch": "bunx vitest",
+    "test:e2e": "npx playwright test --headed",
+    "test:e2e:stress": "npx playwright test --headed --config=playwright-stress.config.ts",
+    "test:e2e:soak": "npx playwright test --headed --config=playwright-soak.config.ts",
+    "test:rust": "cd crates/jp8-core && cargo test",
+    "test:rust:stress": "cd crates/jp8-core && cargo test --test stress -- --ignored",
+    "test:rust:soak": "cd crates/jp8-core && cargo test --test soak -- --ignored",
+    "test:all": "npm run test:rust && npm run test:unit && npm run test:e2e"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -20,6 +28,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
     "vite": "^6.3.5",
-    "vite-plugin-wasm": "^3.6.0"
+    "vite-plugin-wasm": "^3.6.0",
+    "vitest": "^4.1.0"
   }
 }

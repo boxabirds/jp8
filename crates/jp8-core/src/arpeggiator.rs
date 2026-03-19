@@ -134,6 +134,14 @@ impl Arpeggiator {
         }
     }
 
+    pub fn get_held_count(&self) -> usize {
+        self.held_count
+    }
+
+    pub fn get_sequence_len(&self) -> usize {
+        self.sequence_len
+    }
+
     fn next_in_sequence(&mut self) -> u8 {
         if self.held_count == 0 {
             return 0;
@@ -185,5 +193,217 @@ impl Arpeggiator {
         }
 
         note.min(127)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    fn make_arp(mode: ArpMode) -> Arpeggiator {
+        let mut arp = Arpeggiator::new(SR);
+        arp.mode = mode;
+        arp
+    }
+
+    /// Tick the arpeggiator until it fires a note_on, returning that note.
+    /// Returns 0 if nothing fires within `max_ticks`.
+    fn tick_until_note(arp: &mut Arpeggiator, max_ticks: usize) -> u8 {
+        for _ in 0..max_ticks {
+            let (on, _) = arp.tick();
+            if on > 0 { return on; }
+        }
+        0
+    }
+
+    #[test]
+    fn off_mode_passthrough() {
+        let mut arp = make_arp(ArpMode::Off);
+        assert!(!arp.note_on(60));
+        assert!(!arp.note_off(60));
+    }
+
+    #[test]
+    fn up_ascending() {
+        let mut arp = make_arp(ArpMode::Up);
+        arp.set_tempo(120.0);
+        arp.note_on(60); // C4
+        arp.note_on(64); // E4
+        arp.note_on(67); // G4
+
+        let mut seq = Vec::new();
+        let step_samples = (SR * 60.0 / 120.0 / 4.0) as usize;
+        for _ in 0..6 {
+            let note = tick_until_note(&mut arp, step_samples + 100);
+            if note > 0 { seq.push(note); }
+        }
+        // Should cycle: C4, E4, G4, C4, E4, G4
+        assert!(seq.len() >= 3, "Should produce at least 3 notes, got {:?}", seq);
+        assert_eq!(seq[0], 60);
+        assert_eq!(seq[1], 64);
+        assert_eq!(seq[2], 67);
+    }
+
+    #[test]
+    fn down_descending() {
+        let mut arp = make_arp(ArpMode::Down);
+        arp.set_tempo(120.0);
+        arp.note_on(60);
+        arp.note_on(64);
+        arp.note_on(67);
+
+        let step_samples = (SR * 60.0 / 120.0 / 4.0) as usize;
+        let mut seq = Vec::new();
+        for _ in 0..6 {
+            let note = tick_until_note(&mut arp, step_samples + 100);
+            if note > 0 { seq.push(note); }
+        }
+        assert!(seq.len() >= 3);
+        assert_eq!(seq[0], 67);
+        assert_eq!(seq[1], 64);
+        assert_eq!(seq[2], 60);
+    }
+
+    #[test]
+    fn updown_bounces() {
+        let mut arp = make_arp(ArpMode::UpDown);
+        arp.set_tempo(120.0);
+        arp.note_on(60);
+        arp.note_on(64);
+        arp.note_on(67);
+
+        let step_samples = (SR * 60.0 / 120.0 / 4.0) as usize;
+        let mut seq = Vec::new();
+        for _ in 0..9 {
+            let note = tick_until_note(&mut arp, step_samples + 100);
+            if note > 0 { seq.push(note); }
+        }
+        // Up phase: 60, 64, 67, then Down phase: 67, 64, 60
+        assert!(seq.len() >= 6, "Expected 6+ notes, got {:?}", seq);
+        // First 3 ascending
+        assert_eq!(seq[0], 60);
+        assert_eq!(seq[1], 64);
+        assert_eq!(seq[2], 67);
+        // Next 3 descending
+        assert_eq!(seq[3], 67);
+        assert_eq!(seq[4], 64);
+        assert_eq!(seq[5], 60);
+    }
+
+    #[test]
+    fn range_2_octaves() {
+        let mut arp = make_arp(ArpMode::Up);
+        arp.range_octaves = 2;
+        arp.set_tempo(120.0);
+        arp.note_on(60); // C4
+
+        let step_samples = (SR * 60.0 / 120.0 / 4.0) as usize;
+        let mut seq = Vec::new();
+        for _ in 0..4 {
+            let note = tick_until_note(&mut arp, step_samples + 100);
+            if note > 0 { seq.push(note); }
+        }
+        assert!(seq.len() >= 2);
+        assert_eq!(seq[0], 60);  // C4
+        assert_eq!(seq[1], 72);  // C5 (octave up)
+    }
+
+    #[test]
+    fn tempo_step_rate() {
+        let arp = make_arp(ArpMode::Up);
+        // At 120 BPM, 16th note = SR * 60 / 120 / 4
+        let expected = SR * 60.0 / 120.0 / 4.0;
+        assert!((arp.samples_per_step - expected).abs() < 1.0,
+            "Expected ~{expected}, got {}", arp.samples_per_step);
+    }
+
+    #[test]
+    fn add_note_sorted() {
+        let mut arp = make_arp(ArpMode::Up);
+        arp.note_on(67); // G
+        arp.note_on(60); // C
+        arp.note_on(64); // E
+        assert_eq!(arp.held[0], 60);
+        assert_eq!(arp.held[1], 64);
+        assert_eq!(arp.held[2], 67);
+    }
+
+    #[test]
+    fn remove_note_shifts() {
+        let mut arp = make_arp(ArpMode::Up);
+        arp.note_on(60);
+        arp.note_on(64);
+        arp.note_on(67);
+        arp.note_off(64); // remove middle
+        assert_eq!(arp.get_held_count(), 2);
+        assert_eq!(arp.held[0], 60);
+        assert_eq!(arp.held[1], 67);
+    }
+
+    #[test]
+    fn duplicate_ignored() {
+        let mut arp = make_arp(ArpMode::Up);
+        arp.note_on(60);
+        arp.note_on(60);
+        assert_eq!(arp.get_held_count(), 1);
+    }
+
+    #[test]
+    fn max_16_held_notes() {
+        let mut arp = make_arp(ArpMode::Up);
+        for note in 40..56 { // 16 notes
+            arp.note_on(note);
+        }
+        assert_eq!(arp.get_held_count(), 16);
+        arp.note_on(57); // 17th — should be rejected
+        assert_eq!(arp.get_held_count(), 16);
+    }
+
+    #[test]
+    fn all_off_resets() {
+        let mut arp = make_arp(ArpMode::Up);
+        arp.note_on(60);
+        arp.note_on(64);
+        arp.all_off();
+        assert_eq!(arp.get_held_count(), 0);
+        assert_eq!(arp.get_sequence_len(), 0);
+        assert_eq!(arp.current_note, 0);
+    }
+
+    #[test]
+    fn is_active_requires_notes_and_mode() {
+        let mut arp = make_arp(ArpMode::Off);
+        arp.note_on(60); // won't add because mode is Off
+        assert!(!arp.is_active());
+
+        let mut arp = make_arp(ArpMode::Up);
+        assert!(!arp.is_active()); // no notes
+        arp.note_on(60);
+        assert!(arp.is_active()); // mode + notes
+    }
+
+    #[test]
+    fn tick_inactive_returns_zero() {
+        let mut arp = make_arp(ArpMode::Up);
+        // No notes held
+        let (on, off) = arp.tick();
+        assert_eq!(on, 0);
+        assert_eq!(off, 0);
+    }
+
+    #[test]
+    fn note_saturating_add() {
+        let mut arp = make_arp(ArpMode::Up);
+        arp.range_octaves = 4;
+        arp.set_tempo(300.0); // fast
+        arp.note_on(120); // near MIDI max
+
+        let step_samples = (SR * 60.0 / 300.0 / 4.0) as usize;
+        for _ in 0..8 {
+            let note = tick_until_note(&mut arp, step_samples + 100);
+            assert!(note <= 127, "Note exceeded MIDI max: {note}");
+        }
     }
 }

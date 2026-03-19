@@ -2,8 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  testIgnore: ['stress.spec.ts', 'soak.spec.ts'],
-  timeout: 30000,
+  testMatch: 'soak.spec.ts',
+  timeout: 3700000, // 61+ minutes
   retries: 0,
   use: {
     baseURL: 'http://localhost:5173',

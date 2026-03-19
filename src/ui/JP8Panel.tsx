@@ -111,7 +111,7 @@ export function JP8Panel({ engine }: JP8PanelProps) {
       {/* Patch Bank */}
       <div style={styles.patchBank}>
         {FACTORY_PATCHES.map((patch, i) => (
-          <button key={i} style={{ ...styles.patchButton, ...(activePatch === i ? styles.patchActive : {}) }} onClick={() => loadPatch(i)}>
+          <button key={i} data-testid="patch-button" style={{ ...styles.patchButton, ...(activePatch === i ? styles.patchActive : {}) }} onClick={() => loadPatch(i)}>
             <span style={styles.patchNumber}>{String(i + 1).padStart(2, '0')}</span>
             <span>{patch.name}</span>
           </button>
