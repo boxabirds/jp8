@@ -1,12 +1,13 @@
 /**
  * JP-8 AudioWorklet Processor.
  *
- * Zero-copy rendering: WASM owns the output buffer in linear memory.
- * JS reads directly from it via a Float32Array view — no wasm-bindgen copy-back.
+ * Multiple processor instances share one WASM module (same AudioContext).
+ * Each gets a unique engineId → separate WASM engine, output buffer, param buffer.
+ * Zero-copy rendering via Float32Array views into WASM linear memory.
  */
 
 import init, {
-  init_engine,
+  create_engine,
   render,
   get_output_ptr,
   get_output_len,
@@ -18,13 +19,14 @@ import init, {
   get_active_voice_count,
 } from '@jp8-wasm/jp8_wasm.js';
 
-// Will be set after init() — the WASM instance's linear memory
 let wasmMemory: WebAssembly.Memory;
+let wasmReady = false;
+let wasmInitPromise: Promise<void> | null = null;
+let nextEngineId = 0;
 
 const BLOCK_FRAMES = 128;
 const CHANNELS = 2;
 const PARAM_COUNT = 40;
-
 const SAB_ACTIVE_VOICES = 0;
 const SAB_SLOTS = 4;
 
@@ -33,8 +35,23 @@ type Command =
   | { type: 'note-off'; note: number }
   | { type: 'all-notes-off' };
 
+/** Ensure WASM is initialized exactly once across all processor instances. */
+function ensureWasmInit(wasmModule: WebAssembly.Module): Promise<void> {
+  if (wasmReady) return Promise.resolve();
+  if (wasmInitPromise) return wasmInitPromise;
+
+  wasmInitPromise = (async () => {
+    const wasm = await init({ module_or_path: wasmModule });
+    wasmMemory = wasm.memory;
+    wasmReady = true;
+  })();
+
+  return wasmInitPromise;
+}
+
 class JP8Processor extends AudioWorkletProcessor {
   private engineReady = false;
+  private engineId: number;
   private pendingCommands: Command[] = [];
   private outputView: Float32Array | null = null;
   private paramWasmView: Float32Array | null = null;
@@ -44,18 +61,16 @@ class JP8Processor extends AudioWorkletProcessor {
   constructor(options: AudioWorkletProcessorOptions) {
     super();
 
+    this.engineId = nextEngineId++;
+
     const { wasmModule, telemetrySab, paramSab } = options.processorOptions as {
       wasmModule: WebAssembly.Module;
       telemetrySab: SharedArrayBuffer;
       paramSab: SharedArrayBuffer;
     };
 
-    if (telemetrySab) {
-      this.sabInt32 = new Int32Array(telemetrySab, 0, SAB_SLOTS);
-    }
-    if (paramSab) {
-      this.paramSabView = new Float32Array(paramSab);
-    }
+    if (telemetrySab) this.sabInt32 = new Int32Array(telemetrySab, 0, SAB_SLOTS);
+    if (paramSab) this.paramSabView = new Float32Array(paramSab);
 
     this.initEngine(wasmModule);
 
@@ -71,16 +86,17 @@ class JP8Processor extends AudioWorkletProcessor {
 
   private async initEngine(wasmModule: WebAssembly.Module): Promise<void> {
     try {
-      const wasm = await init({ module_or_path: wasmModule });
-      wasmMemory = wasm.memory;
-      init_engine(sampleRate);
+      await ensureWasmInit(wasmModule);
 
-      // Get pointers to pre-allocated buffers in WASM linear memory — zero copy
-      const outputPtr = get_output_ptr() as unknown as number;
+      // Create this instance's engine in the shared WASM module
+      create_engine(this.engineId, sampleRate);
+
+      // Get pointers to this engine's pre-allocated buffers
+      const outputPtr = get_output_ptr(this.engineId) as unknown as number;
       const outputLen = get_output_len();
       this.outputView = new Float32Array(wasmMemory.buffer, outputPtr, outputLen);
 
-      const paramPtr = get_param_ptr() as unknown as number;
+      const paramPtr = get_param_ptr(this.engineId) as unknown as number;
       this.paramWasmView = new Float32Array(wasmMemory.buffer, paramPtr, PARAM_COUNT);
 
       this.engineReady = true;
@@ -90,7 +106,7 @@ class JP8Processor extends AudioWorkletProcessor {
       }
       this.pendingCommands = [];
 
-      this.port.postMessage({ type: 'ready', sampleRate, blockFrames: BLOCK_FRAMES });
+      this.port.postMessage({ type: 'ready', sampleRate, blockFrames: BLOCK_FRAMES, engineId: this.engineId });
     } catch (err) {
       this.port.postMessage({ type: 'error', message: String(err) });
     }
@@ -99,13 +115,13 @@ class JP8Processor extends AudioWorkletProcessor {
   private handleCommand(cmd: Command): void {
     switch (cmd.type) {
       case 'note-on':
-        note_on(cmd.note, cmd.velocity);
+        note_on(this.engineId, cmd.note, cmd.velocity);
         break;
       case 'note-off':
-        note_off(cmd.note);
+        note_off(this.engineId, cmd.note);
         break;
       case 'all-notes-off':
-        all_notes_off();
+        all_notes_off(this.engineId);
         break;
     }
   }
@@ -117,25 +133,24 @@ class JP8Processor extends AudioWorkletProcessor {
       return true;
     }
 
-    // Refresh views if WASM memory grew (defensive — shouldn't happen in render path)
+    // Refresh views if WASM memory grew
     if (this.outputView.buffer !== wasmMemory.buffer) {
-      const outputPtr = get_output_ptr() as unknown as number;
-      const outputLen = get_output_len();
-      this.outputView = new Float32Array(wasmMemory.buffer, outputPtr, outputLen);
-      const paramPtr = get_param_ptr() as unknown as number;
+      const outputPtr = get_output_ptr(this.engineId) as unknown as number;
+      this.outputView = new Float32Array(wasmMemory.buffer, outputPtr, get_output_len());
+      const paramPtr = get_param_ptr(this.engineId) as unknown as number;
       this.paramWasmView = new Float32Array(wasmMemory.buffer, paramPtr, PARAM_COUNT);
     }
 
-    // Copy SAB params → WASM param buffer, then apply
+    // SAB params → WASM param buffer → apply
     if (this.paramSabView) {
       this.paramWasmView.set(this.paramSabView);
-      apply_params_from_buf();
+      apply_params_from_buf(this.engineId);
     }
 
-    // Render into WASM-owned buffer (zero copy)
-    render();
+    // Render this engine's block (zero copy — writes to engine's own buffer)
+    render(this.engineId);
 
-    // Deinterleave from WASM memory directly to Web Audio output
+    // Deinterleave from WASM memory to Web Audio output
     const out = outputs[0];
     if (out && out.length >= CHANNELS) {
       const left = out[0];
@@ -147,9 +162,8 @@ class JP8Processor extends AudioWorkletProcessor {
       }
     }
 
-    // Telemetry to SAB
     if (this.sabInt32) {
-      Atomics.store(this.sabInt32, SAB_ACTIVE_VOICES, get_active_voice_count());
+      Atomics.store(this.sabInt32, SAB_ACTIVE_VOICES, get_active_voice_count(this.engineId));
     }
 
     return true;

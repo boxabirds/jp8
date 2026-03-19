@@ -185,7 +185,7 @@ const styles: Record<string, React.CSSProperties> = {
   topBar: { display: 'flex', alignItems: 'center', gap: 8, borderBottom: '2px solid #444', paddingBottom: 8 },
   startButton: { padding: '10px 28px', fontSize: 14, fontWeight: 600, fontFamily: 'Inter, sans-serif', color: '#1a1a1a', backgroundColor: '#e8a045', border: 'none', borderRadius: 6, cursor: 'pointer' },
   tabs: { display: 'flex', gap: 3, flex: 1 },
-  tab: { padding: '5px 12px', fontSize: 11, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: '#aaa', backgroundColor: '#1e1e1e', border: '1px solid #444', borderRadius: '4px 4px 0 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 },
+  tab: { padding: '5px 12px', fontSize: 11, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: '#aaa', backgroundColor: '#1e1e1e', borderWidth: 1, borderStyle: 'solid', borderColor: '#444', borderRadius: '4px 4px 0 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 },
   tabActive: { backgroundColor: '#e8a045', color: '#1a1a1a', fontWeight: 700, borderColor: '#e8a045' },
   tabClose: { fontSize: 13, cursor: 'pointer', opacity: 0.6, lineHeight: 1 },
   addTab: { padding: '5px 10px', fontSize: 14, fontWeight: 700, fontFamily: 'Inter, sans-serif', color: '#888', backgroundColor: '#1e1e1e', border: '1px solid #444', borderRadius: '4px 4px 0 0', cursor: 'pointer' },

@@ -203,7 +203,7 @@ const styles: Record<string, React.CSSProperties> = {
   brandName: { fontFamily: 'Orbitron, monospace', fontSize: 22, fontWeight: 700, color: '#e8a045', letterSpacing: '0.1em' },
   brandSub: { fontSize: 9, color: '#888', letterSpacing: '0.15em', textTransform: 'uppercase' },
   patchBank: { display: 'flex', flexWrap: 'wrap', gap: 3, padding: '4px 0', borderBottom: '1px solid #333' },
-  patchButton: { padding: '3px 8px', fontSize: 9, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: '#999', backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: 3, cursor: 'pointer', display: 'flex', gap: 4, alignItems: 'center', transition: 'all 0.1s' },
+  patchButton: { padding: '3px 8px', fontSize: 9, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: '#999', backgroundColor: '#1a1a1a', borderWidth: 1, borderStyle: 'solid', borderColor: '#333', borderRadius: 3, cursor: 'pointer', display: 'flex', gap: 4, alignItems: 'center', transition: 'all 0.1s' },
   patchActive: { backgroundColor: '#e8a045', color: '#1a1a1a', borderColor: '#e8a045', fontWeight: 700 },
   patchNumber: { fontSize: 8, opacity: 0.6, fontFamily: 'monospace' },
   sections: { display: 'flex', alignItems: 'flex-start', gap: 0, padding: '8px 0', flexWrap: 'wrap', justifyContent: 'center' },
