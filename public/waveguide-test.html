@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Waveguide Standalone Test</title>
+<style>
+body { background: #1a1a1a; color: #ccc; font-family: sans-serif; padding: 20px; }
+button { padding: 8px 16px; margin: 4px; font-size: 14px; cursor: pointer; background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; }
+button:hover { background: #444; }
+button.active { background: #e8a045; color: #1a1a1a; }
+.controls { margin: 16px 0; }
+label { display: inline-block; width: 80px; }
+input[type=range] { width: 200px; }
+#status { color: #e8a045; margin: 8px 0; }
+.grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; max-width: 600px; }
+.grid button { font-size: 11px; padding: 6px; }
+</style>
+</head>
+<body>
+<h2>Waveguide Standalone Test</h2>
+<p>Direct port of audio-1's CommutedMatrixSynth — no voice system, no filter, no envelopes.</p>
+
+<button id="start" onclick="startAudio()">Start Audio</button>
+<div id="status"></div>
+
+<div class="controls">
+  <div><label>Pitch</label><input type="range" id="pitch" min="0" max="1" step="0.01" value="0.3"><span id="pitchVal"></span></div>
+  <div><label>Brightness</label><input type="range" id="brightness" min="0" max="1" step="0.01" value="0.6"><span id="brightVal"></span></div>
+  <div><label>Decay</label><input type="range" id="decay" min="0" max="1" step="0.01" value="0.5"><span id="decayVal"></span></div>
+  <div><label>Gain</label><input type="range" id="gain" min="0" max="1" step="0.01" value="0.6"><span id="gainVal"></span></div>
+</div>
+
+<h3>Excitation × Body</h3>
+<div class="grid" id="matrix"></div>
+
+<script type="module">
+const EXCITATION_FILES = [
+  '/samples/excitations/anvil-strike.wav',
+  '/samples/excitations/air-hiss-01.wav',
+  '/samples/excitations/bubble-pop.wav',
+  '/samples/excitations/door-stop-twang-01.wav',
+  '/samples/excitations/hammer-anvil-hit-01.wav',
+  '/samples/excitations/relay-click-01.wav',
+];
+const BODY_FILES = [
+  '/samples/bodies/glass-resonance-01.wav',
+  '/samples/bodies/metal-bar-resonance-01.wav',
+  '/samples/bodies/metal-tube-clear-01.wav',
+  '/samples/bodies/tubular-bell-strike-01.wav',
+  '/samples/bodies/wine-glass-ring-01.wav',
+];
+const EXC_NAMES = ['Anvil', 'Hiss', 'Pop', 'Twang', 'Hammer', 'Click'];
+const BODY_NAMES = ['Glass', 'Metal Bar', 'Metal Tube', 'Bell', 'Wine Glass'];
+
+const MAX_WAVETABLE = 16384;
+const TAPER_RATIO = 0.4;
+const NORMALIZE_PEAK = 0.5;
+const DELAY_SIZE = 2048;
+const FADE_SAMPLES = 128;
+const MIN_FEEDBACK = 0.995;
+const FEEDBACK_RANGE = 0.0049;
+const MIN_PITCH = 50;
+const PITCH_RANGE = 500;
+const DENORMAL_BIAS = 1e-25;
+
+let ctx = null;
+let excBuffers = [];
+let bodyBuffers = [];
+let convCache = new Map();
+let workletNode = null;
+
+async function fetchBuf(url) {
+  const resp = await fetch(url);
+  const ab = await resp.arrayBuffer();
+  return ctx.decodeAudioData(ab);
+}
+
+async function preConvolve(exc, body) {
+  const fullLen = exc.length + body.length - 1;
+  const sr = exc.sampleRate;
+  const offline = new OfflineAudioContext(1, fullLen, sr);
+  const src = offline.createBufferSource();
+  src.buffer = exc;
+  const conv = new ConvolverNode(offline, { buffer: body });
+  src.connect(conv);
+  conv.connect(offline.destination);
+  src.start();
+  const rendered = await offline.startRendering();
+  const full = rendered.getChannelData(0);
+  const len = Math.min(full.length, MAX_WAVETABLE);
+  const data = new Float32Array(len);
+  const taperStart = Math.floor(len * (1 - TAPER_RATIO));
+  const taperLen = len - taperStart;
+  for (let i = 0; i < len; i++) {
+    if (i < taperStart) {
+      data[i] = full[i];
+    } else {
+      const t = (i - taperStart) / taperLen;
+      data[i] = full[i] * 0.5 * (1 + Math.cos(Math.PI * t));
+    }
+  }
+  let peak = 0;
+  for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(data[i]));
+  if (peak > 0.001) {
+    const scale = NORMALIZE_PEAK / peak;
+    for (let i = 0; i < len; i++) data[i] *= scale;
+  }
+  return data;
+}
+
+// Pure JS waveguide — no WASM, no voices, no filter
+class JSWaveguide {
+  constructor(sampleRate) {
+    this.sr = sampleRate;
+    this.wavetable = new Float32Array(MAX_WAVETABLE);
+    this.wtLen = 0;
+    this.wtPos = 0;
+    this.wtPlaying = false;
+    this.delay = new Float32Array(DELAY_SIZE);
+    this.delayWrite = 0;
+    this.delayLength = 200;
+    this.filterState = 0;
+    this.fadeRemaining = 0;
+  }
+
+  setWavetable(data) {
+    this.wavetable.set(data);
+    this.wtLen = data.length;
+  }
+
+  trigger() {
+    this.wtPos = 0;
+    this.wtPlaying = this.wtLen > 0;
+    // Only crossfade if delay has content
+    let hasContent = false;
+    for (let i = 0; i < this.delay.length; i++) {
+      if (Math.abs(this.delay[i]) > 0.001) { hasContent = true; break; }
+    }
+    this.fadeRemaining = hasContent ? FADE_SAMPLES : 0;
+  }
+
+  render(output, frames, pitchNorm, brightness, decayNorm, gain) {
+    const pitchHz = MIN_PITCH + pitchNorm * PITCH_RANGE;
+    const feedback = MIN_FEEDBACK + decayNorm * FEEDBACK_RANGE;
+    this.delayLength = Math.max(2, Math.min(DELAY_SIZE - 1, Math.floor(this.sr / pitchHz)));
+    const filterCoeff = 1.0 - brightness * 0.95;
+
+    for (let frame = 0; frame < frames; frame++) {
+      let rawExc = 0;
+      if (this.wtPlaying && this.wtPos < this.wtLen) {
+        rawExc = this.wavetable[this.wtPos++];
+        if (this.wtPos >= this.wtLen) this.wtPlaying = false;
+      }
+
+      let excitation, feedbackScale;
+      if (this.fadeRemaining > 0) {
+        const t = this.fadeRemaining / FADE_SAMPLES;
+        this.fadeRemaining--;
+        excitation = rawExc * (1 - t);
+        feedbackScale = t * 0.3;
+      } else {
+        excitation = rawExc;
+        feedbackScale = 1.0;
+      }
+
+      const readPos = (this.delayWrite + DELAY_SIZE - this.delayLength) % DELAY_SIZE;
+      const delayed = this.delay[readPos];
+
+      this.filterState = delayed * (1 - filterCoeff) + this.filterState * filterCoeff;
+
+      this.delay[this.delayWrite] = excitation + this.filterState * feedback * feedbackScale + DENORMAL_BIAS;
+      this.delayWrite = (this.delayWrite + 1) % DELAY_SIZE;
+
+      const sample = delayed * gain;
+      output[frame * 2] = sample;
+      output[frame * 2 + 1] = sample;
+    }
+  }
+}
+
+let wg = null;
+
+window.startAudio = async function() {
+  ctx = new AudioContext({ sampleRate: 44100 });
+  document.getElementById('status').textContent = 'Loading samples...';
+
+  excBuffers = await Promise.all(EXCITATION_FILES.map(f => fetchBuf(f)));
+  bodyBuffers = await Promise.all(BODY_FILES.map(f => fetchBuf(f)));
+
+  document.getElementById('status').textContent = 'Samples loaded. Setting up worklet...';
+
+  // Use ScriptProcessorNode for simplicity (deprecated but works for testing)
+  wg = new JSWaveguide(ctx.sampleRate);
+  const bufSize = 1024;
+  const proc = ctx.createScriptProcessor(bufSize, 0, 2);
+  proc.onaudioprocess = (e) => {
+    const outL = e.outputBuffer.getChannelData(0);
+    const outR = e.outputBuffer.getChannelData(1);
+    const frames = outL.length;
+    const buf = new Float32Array(frames * 2);
+    const pitch = document.getElementById('pitch').value;
+    const bright = document.getElementById('brightness').value;
+    const decay = document.getElementById('decay').value;
+    const gain = document.getElementById('gain').value;
+    wg.render(buf, frames, +pitch, +bright, +decay, +gain);
+    for (let i = 0; i < frames; i++) {
+      outL[i] = buf[i * 2];
+      outR[i] = buf[i * 2 + 1];
+    }
+  };
+  proc.connect(ctx.destination);
+
+  document.getElementById('status').textContent = 'Ready — click a cell to play.';
+  document.getElementById('start').classList.add('active');
+
+  // Build matrix
+  buildMatrix();
+};
+
+function buildMatrix() {
+  const grid = document.getElementById('matrix');
+  grid.innerHTML = '';
+  // Header row
+  grid.style.gridTemplateColumns = `80px repeat(${BODY_NAMES.length}, 1fr)`;
+  grid.innerHTML += '<div></div>';
+  for (const name of BODY_NAMES) {
+    grid.innerHTML += `<div style="text-align:center;font-size:10px;color:#e8a045">${name}</div>`;
+  }
+  for (let e = 0; e < EXC_NAMES.length; e++) {
+    grid.innerHTML += `<div style="font-size:10px;color:#e8a045;display:flex;align-items:center">${EXC_NAMES[e]}</div>`;
+    for (let b = 0; b < BODY_NAMES.length; b++) {
+      const btn = document.createElement('button');
+      btn.textContent = `${EXC_NAMES[e]}+${BODY_NAMES[b]}`;
+      btn.onclick = () => playCell(e, b);
+      grid.appendChild(btn);
+    }
+  }
+}
+
+async function playCell(excIdx, bodyIdx) {
+  if (!ctx || !wg) return;
+  await ctx.resume();
+
+  const key = `${excIdx}-${bodyIdx}`;
+  let wavetable = convCache.get(key);
+  if (!wavetable) {
+    document.getElementById('status').textContent = `Computing ${EXC_NAMES[excIdx]}+${BODY_NAMES[bodyIdx]}...`;
+    wavetable = await preConvolve(excBuffers[excIdx], bodyBuffers[bodyIdx]);
+    convCache.set(key, wavetable);
+  }
+
+  wg.setWavetable(wavetable);
+  wg.trigger();
+  document.getElementById('status').textContent = `Playing: ${EXC_NAMES[excIdx]} + ${BODY_NAMES[bodyIdx]}`;
+}
+
+// Update displays
+['pitch','brightness','decay','gain'].forEach(id => {
+  const el = document.getElementById(id);
+  const span = document.getElementById(id + 'Val');
+  const update = () => { span.textContent = ' ' + (+el.value).toFixed(2); };
+  el.oninput = update;
+  update();
+});
+</script>
+</body>
+</html>
