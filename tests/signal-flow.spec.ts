@@ -9,10 +9,9 @@ test.describe('Signal Flow Bar', () => {
     await expect(page.getByTestId('signal-flow-bar')).toBeVisible();
   });
 
-  test('all expected blocks are present', async ({ page }) => {
+  test('module blocks are present', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('start-audio').click();
-    await expect(page.getByTestId('sfb-source')).toBeVisible();
     await expect(page.getByTestId('sfb-bubble')).toBeVisible();
     await expect(page.getByTestId('sfb-vcf')).toBeVisible();
     await expect(page.getByTestId('sfb-modal')).toBeVisible();
@@ -38,10 +37,8 @@ test.describe('Signal Flow Bar', () => {
     await page.goto('/');
     await page.getByTestId('start-audio').click();
 
-    // Tray should not exist initially
     await expect(page.getByTestId('module-tray')).not.toBeVisible();
 
-    // Click modal expand
     await page.getByTestId('sfb-modal-expand').click();
     await expect(page.getByTestId('module-tray')).toBeVisible();
   });
@@ -50,11 +47,9 @@ test.describe('Signal Flow Bar', () => {
     await page.goto('/');
     await page.getByTestId('start-audio').click();
 
-    // Open modal tray
     await page.getByTestId('sfb-modal-expand').click();
     await expect(page.getByTestId('module-tray')).toBeVisible();
 
-    // Switch to chaos — tray should still be visible (different content)
     await page.getByTestId('sfb-chaos-expand').click();
     await expect(page.getByTestId('module-tray')).toBeVisible();
   });
@@ -70,31 +65,31 @@ test.describe('Signal Flow Bar', () => {
     await expect(page.getByTestId('module-tray')).not.toBeVisible();
   });
 
-  test('source selector WG dims VCO sections', async ({ page }) => {
+  test('source selector switches VCO and waveguide sections', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('start-audio').click();
 
-    // Select WG source
-    const wgBtn = page.getByTestId('sfb-source').getByText('WG');
-    await wgBtn.click();
-    await page.waitForTimeout(300);
+    // Default: VCO source, VCO-1 section visible
+    await expect(page.getByText('VCO-1')).toBeVisible();
 
-    // Module tray should open with waveguide controls
-    await expect(page.getByTestId('module-tray')).toBeVisible();
+    // Select WAVEGUIDE
+    await page.getByText('WAVEGUIDE').click();
+    await page.waitForTimeout(200);
 
-    // Switch back to BLEP
-    const blepBtn = page.getByTestId('sfb-source').getByText('BLEP');
-    await blepBtn.click();
-    await page.waitForTimeout(300);
+    // VCO-1 should be replaced by WAVEGUIDE section
+    await expect(page.getByText('VCO-1')).not.toBeVisible();
 
-    // Tray should close
-    await expect(page.getByTestId('module-tray')).not.toBeVisible();
+    // Switch back to VCO
+    await page.getByText('VCO').first().click();
+    await page.waitForTimeout(200);
+
+    // VCO-1 should be back
+    await expect(page.getByText('VCO-1')).toBeVisible();
   });
 
   test('existing patches still produce audio with signal flow bar', async ({ page }) => {
     await startAndInjectAnalyser(page);
 
-    // Play note with default patch (BLEP source, no modules)
     await playNote(page, 60);
     await page.waitForTimeout(300);
     expect(await isAudioPresent(page)).toBe(true);

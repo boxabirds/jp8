@@ -46,6 +46,12 @@ const ARP_OPTS = [
   { label: 'U/D', value: 3 },
 ];
 
+const SOURCE_MODE_OPTS = [
+  { label: 'VCO', value: 0 },
+  { label: 'SPECTRAL', value: 1 },
+  { label: 'WAVEGUIDE', value: 2 },
+];
+
 const WG_EXCITE_OPTS = [
   { label: 'Anvil', value: 0 },
   { label: 'Hiss', value: 1 },
@@ -132,6 +138,20 @@ export function JP8Panel({ engine }: JP8PanelProps) {
           <button key={i} data-testid="patch-button" style={{ ...styles.patchButton, ...(activePatch === i ? styles.patchActive : {}) }} onClick={() => loadPatch(i)}>
             <span style={styles.patchNumber}>{String(i + 1).padStart(2, '0')}</span>
             <span>{patch.name}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Source Selector */}
+      <div style={styles.sourceRow}>
+        <span style={styles.sourceLabel}>SOURCE</span>
+        {SOURCE_MODE_OPTS.map(opt => (
+          <button
+            key={opt.value}
+            style={{ ...styles.sourceBtn, ...(params[P.SOURCE_MODE] === opt.value ? styles.sourceBtnActive : {}) }}
+            onClick={() => setP(P.SOURCE_MODE, opt.value)}
+          >
+            {opt.label}
           </button>
         ))}
       </div>
@@ -246,5 +266,9 @@ const styles: Record<string, React.CSSProperties> = {
   sectionTitle: { fontSize: 9, fontWeight: 700, color: '#e8a045', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid #555', paddingBottom: 3, width: '100%', textAlign: 'center' },
   sectionContent: { display: 'flex', alignItems: 'flex-start', gap: 2 },
   divider: { width: 1, alignSelf: 'stretch', backgroundColor: '#444', margin: '0 1px', flexShrink: 0 },
+  sourceRow: { display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderBottom: '1px solid #333' },
+  sourceLabel: { fontSize: 9, fontWeight: 700, color: '#888', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginRight: 4 },
+  sourceBtn: { fontSize: 10, fontWeight: 600, padding: '4px 12px', border: '1px solid #444', borderRadius: 3, backgroundColor: '#1e1e1e', color: '#888', cursor: 'pointer' },
+  sourceBtnActive: { backgroundColor: '#e8a045', color: '#1a1a1a', borderColor: '#e8a045' },
   keyboardSection: { borderTop: '2px solid #444', paddingTop: 12, display: 'flex', justifyContent: 'center' },
 };

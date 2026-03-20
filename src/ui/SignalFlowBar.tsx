@@ -46,16 +46,6 @@ export function SignalFlowBar({ params, setP }: SignalFlowBarProps) {
     <div data-testid="signal-flow-bar" style={styles.container}>
       {/* Strip */}
       <div style={styles.strip}>
-        {/* SOURCE */}
-        <div style={{ ...styles.block, ...(sourceMode !== 0 ? styles.active : {}), ...(expandedBlock === 'source' ? styles.expanded : {}) }} data-testid="sfb-source">
-          <span style={styles.label}>SRC</span>
-          {SOURCE_OPTS.map((name, i) => (
-            <button key={i} style={{ ...styles.srcBtn, ...(sourceMode === i ? styles.srcBtnOn : {}) }} onClick={() => handleSourceChange(i)}>{name}</button>
-          ))}
-        </div>
-
-        <span style={styles.arrow}>→</span>
-
         {/* BUBBLE */}
         <div style={{ ...styles.block, ...(bubbleActive ? styles.active : {}), ...(expandedBlock === 'bubble' ? styles.expanded : {}) }} data-testid="sfb-bubble">
           <span style={styles.label}>BUB</span>
