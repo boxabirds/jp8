@@ -81,19 +81,48 @@ impl Waveguide {
         self.loop_filter_state = 0.0;
     }
 
-    /// Excite with convolution of excitation and body IR (commuted synthesis).
+    /// Excite with real convolution of excitation and body IR (commuted synthesis).
+    /// Called on note_on only — not in the audio hot path.
     pub fn excite_commuted(&mut self, excitation_preset: u8, body_preset: u8, velocity: f32) {
         let exc_idx = (excitation_preset as usize).min(sample_data::EXCITATIONS.len() - 1);
         let body_idx = (body_preset as usize).min(sample_data::BODIES.len() - 1);
 
-        let exc_data = sample_data::EXCITATIONS[exc_idx];
-        let body_data = sample_data::BODIES[body_idx];
+        let exc = sample_data::EXCITATIONS[exc_idx];
+        let body = sample_data::BODIES[body_idx];
         let vel_scale = 0.3 + velocity * 0.7;
 
-        // Simple commuted synthesis: multiply excitation with body IR
-        // (short-time approximation of convolution — works well for transients)
+        // Real time-domain convolution: output[n] = sum(exc[k] * body[n-k])
+        // Truncated to EXCITATION_LEN samples (the delay line handles sustain).
+        // Cost: 512×512 = ~262K multiplies, but only runs once per note_on.
+        for n in 0..EXCITATION_LEN {
+            let mut sum = 0.0f32;
+            let k_max = (n + 1).min(EXCITATION_LEN);
+            for k in 0..k_max {
+                if n >= k {
+                    sum += exc[k] * body[n - k];
+                }
+            }
+            self.excitation_buf[n] = sum * vel_scale;
+        }
+
+        // Normalize the convolution result to prevent volume explosion
+        let mut peak = 0.0f32;
         for i in 0..EXCITATION_LEN {
-            self.excitation_buf[i] = (exc_data[i] * 0.6 + exc_data[i] * body_data[i] * 0.4) * vel_scale;
+            peak = peak.max(self.excitation_buf[i].abs());
+        }
+        if peak > 0.001 {
+            let scale = 0.8 / peak;
+            for i in 0..EXCITATION_LEN {
+                self.excitation_buf[i] *= scale;
+            }
+        }
+
+        // Cosine fade-out at end to prevent click at truncation boundary
+        let fade_len = 64;
+        for i in 0..fade_len {
+            let t = i as f32 / fade_len as f32;
+            let window = 0.5 * (1.0 + (core::f32::consts::PI * t).cos());
+            self.excitation_buf[EXCITATION_LEN - fade_len + i] *= window;
         }
 
         self.excitation_pos = 0;
