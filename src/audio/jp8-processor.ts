@@ -8,11 +8,12 @@
 
 import init, {
   create_engine,
-  init_wavetable_cache,
   render,
   get_output_ptr,
   get_output_len,
   get_param_ptr,
+  get_wavetable_ptr,
+  store_wavetable,
   apply_params_from_buf,
   note_on,
   note_off,
@@ -34,7 +35,8 @@ const SAB_SLOTS = 4;
 type Command =
   | { type: 'note-on'; note: number; velocity: number }
   | { type: 'note-off'; note: number }
-  | { type: 'all-notes-off' };
+  | { type: 'all-notes-off' }
+  | { type: 'upload-wavetable'; excIdx: number; bodyIdx: number; data: Float32Array };
 
 /** Ensure WASM is initialized exactly once across all processor instances. */
 function ensureWasmInit(wasmModule: WebAssembly.Module): Promise<void> {
@@ -89,9 +91,8 @@ class JP8Processor extends AudioWorkletProcessor {
     try {
       await ensureWasmInit(wasmModule);
 
-      // Create this instance's engine and pre-compute waveguide wavetables
+      // Create this instance's engine (wavetables uploaded later from JS)
       create_engine(this.engineId, sampleRate);
-      init_wavetable_cache(this.engineId);
 
       // Get pointers to this engine's pre-allocated buffers
       const outputPtr = get_output_ptr(this.engineId) as unknown as number;
@@ -125,6 +126,16 @@ class JP8Processor extends AudioWorkletProcessor {
       case 'all-notes-off':
         all_notes_off(this.engineId);
         break;
+      case 'upload-wavetable': {
+        // Copy Float32Array data into WASM memory, then store in engine cache
+        const ptr = get_wavetable_ptr(this.engineId) as unknown as number;
+        if (ptr && wasmMemory) {
+          const view = new Float32Array(wasmMemory.buffer, ptr, cmd.data.length);
+          view.set(cmd.data);
+          store_wavetable(this.engineId, cmd.excIdx, cmd.bodyIdx, cmd.data.length);
+        }
+        break;
+      }
     }
   }
 

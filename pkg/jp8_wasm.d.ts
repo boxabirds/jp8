@@ -3,9 +3,6 @@
 
 export function all_notes_off(id: number): void;
 
-/**
- * Apply params from engine #id's param buffer.
- */
 export function apply_params_from_buf(id: number): void;
 
 export function create_engine(id: number, sample_rate: number): void;
@@ -16,30 +13,27 @@ export function get_active_voice_count(id: number): number;
 
 export function get_output_len(): number;
 
-/**
- * Returns pointer to engine #id's output buffer.
- */
 export function get_output_ptr(id: number): number;
 
-/**
- * Returns pointer to engine #id's param buffer.
- */
 export function get_param_ptr(id: number): number;
 
 /**
- * Initialize the wavetable cache for waveguide mode.
- * Called separately so engine creation is fast; cache is computed in background.
+ * Returns pointer to engine #id's wavetable upload buffer.
+ * JS writes convolved data here, then calls store_wavetable.
  */
-export function init_wavetable_cache(id: number): void;
+export function get_wavetable_ptr(id: number): number;
 
 export function note_off(id: number, note: number): void;
 
 export function note_on(id: number, note: number, velocity: number): void;
 
-/**
- * Render engine #id into its own output buffer.
- */
 export function render(id: number): void;
+
+/**
+ * Store the uploaded wavetable into the engine's cache at (exc, body) index.
+ * JS calls this after writing data to the wavetable buffer.
+ */
+export function store_wavetable(id: number, exc_idx: number, body_idx: number, len: number): void;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -53,10 +47,11 @@ export interface InitOutput {
     readonly get_output_len: () => number;
     readonly get_output_ptr: (a: number) => number;
     readonly get_param_ptr: (a: number) => number;
-    readonly init_wavetable_cache: (a: number) => void;
+    readonly get_wavetable_ptr: (a: number) => number;
     readonly note_off: (a: number, b: number) => void;
     readonly note_on: (a: number, b: number, c: number) => void;
     readonly render: (a: number) => void;
+    readonly store_wavetable: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_start: () => void;
 }

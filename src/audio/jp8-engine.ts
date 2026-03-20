@@ -93,9 +93,33 @@ export class JP8Engine {
       }
 
       this.setStatus('ready');
+
+      // Pre-convolve waveguide wavetables in background (non-blocking)
+      this.loadWaveguideWavetables();
     } catch (err) {
       console.error('JP8 start failed:', err);
       this.setStatus('error');
+    }
+  }
+
+  private async loadWaveguideWavetables(): Promise<void> {
+    try {
+      const { loadWaveguideSamples, getConvolvedWavetable, EXCITATION_COUNT, BODY_COUNT } = await import('./waveguide-loader');
+      const presets = await loadWaveguideSamples();
+
+      for (let exc = 0; exc < EXCITATION_COUNT; exc++) {
+        for (let body = 0; body < BODY_COUNT; body++) {
+          const wavetable = await getConvolvedWavetable(presets, exc, body);
+          this.workletNode?.port.postMessage({
+            type: 'upload-wavetable',
+            excIdx: exc,
+            bodyIdx: body,
+            data: wavetable,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Waveguide wavetable loading failed:', err);
     }
   }
 

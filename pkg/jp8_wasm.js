@@ -8,7 +8,6 @@ export function all_notes_off(id) {
 }
 
 /**
- * Apply params from engine #id's param buffer.
  * @param {number} id
  */
 export function apply_params_from_buf(id) {
@@ -48,7 +47,6 @@ export function get_output_len() {
 }
 
 /**
- * Returns pointer to engine #id's output buffer.
  * @param {number} id
  * @returns {number}
  */
@@ -58,7 +56,6 @@ export function get_output_ptr(id) {
 }
 
 /**
- * Returns pointer to engine #id's param buffer.
  * @param {number} id
  * @returns {number}
  */
@@ -68,12 +65,14 @@ export function get_param_ptr(id) {
 }
 
 /**
- * Initialize the wavetable cache for waveguide mode.
- * Called separately so engine creation is fast; cache is computed in background.
+ * Returns pointer to engine #id's wavetable upload buffer.
+ * JS writes convolved data here, then calls store_wavetable.
  * @param {number} id
+ * @returns {number}
  */
-export function init_wavetable_cache(id) {
-    wasm.init_wavetable_cache(id);
+export function get_wavetable_ptr(id) {
+    const ret = wasm.get_wavetable_ptr(id);
+    return ret >>> 0;
 }
 
 /**
@@ -94,11 +93,22 @@ export function note_on(id, note, velocity) {
 }
 
 /**
- * Render engine #id into its own output buffer.
  * @param {number} id
  */
 export function render(id) {
     wasm.render(id);
+}
+
+/**
+ * Store the uploaded wavetable into the engine's cache at (exc, body) index.
+ * JS calls this after writing data to the wavetable buffer.
+ * @param {number} id
+ * @param {number} exc_idx
+ * @param {number} body_idx
+ * @param {number} len
+ */
+export function store_wavetable(id, exc_idx, body_idx, len) {
+    wasm.store_wavetable(id, exc_idx, body_idx, len);
 }
 
 function __wbg_get_imports() {
