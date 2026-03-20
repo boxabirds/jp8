@@ -224,14 +224,24 @@ window.startAudio = async function() {
 function buildMatrix() {
   const grid = document.getElementById('matrix');
   grid.innerHTML = '';
-  // Header row
   grid.style.gridTemplateColumns = `80px repeat(${BODY_NAMES.length}, 1fr)`;
-  grid.innerHTML += '<div></div>';
+
+  // Header row
+  const corner = document.createElement('div');
+  grid.appendChild(corner);
   for (const name of BODY_NAMES) {
-    grid.innerHTML += `<div style="text-align:center;font-size:10px;color:#e8a045">${name}</div>`;
+    const hdr = document.createElement('div');
+    hdr.textContent = name;
+    hdr.style.cssText = 'text-align:center;font-size:10px;color:#e8a045';
+    grid.appendChild(hdr);
   }
+
+  // Cells
   for (let e = 0; e < EXC_NAMES.length; e++) {
-    grid.innerHTML += `<div style="font-size:10px;color:#e8a045;display:flex;align-items:center">${EXC_NAMES[e]}</div>`;
+    const label = document.createElement('div');
+    label.textContent = EXC_NAMES[e];
+    label.style.cssText = 'font-size:10px;color:#e8a045;display:flex;align-items:center';
+    grid.appendChild(label);
     for (let b = 0; b < BODY_NAMES.length; b++) {
       const btn = document.createElement('button');
       btn.textContent = `${EXC_NAMES[e]}+${BODY_NAMES[b]}`;
