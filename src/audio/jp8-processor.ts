@@ -134,7 +134,9 @@ class JP8Processor extends AudioWorkletProcessor {
           const view = new Float32Array(wasmMemory.buffer, ptr, cmd.data.length);
           view.set(cmd.data);
           store_wavetable(this.engineId, cmd.excIdx, cmd.bodyIdx, cmd.data.length);
-          console.log(`[JP8] Uploaded wavetable exc=${cmd.excIdx} body=${cmd.bodyIdx} len=${cmd.data.length}`);
+          // Verify data has content
+          const peak = cmd.data.reduce((max, s) => Math.max(max, Math.abs(s)), 0);
+          console.log(`[JP8] Uploaded wavetable exc=${cmd.excIdx} body=${cmd.bodyIdx} len=${cmd.data.length} peak=${peak.toFixed(4)}`);
         } else {
           console.warn(`[JP8] Failed to upload wavetable: ptr=${ptr} memory=${!!wasmMemory}`);
         }

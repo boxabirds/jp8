@@ -65,12 +65,14 @@ impl Waveguide {
         self.feedback = FEEDBACK_MIN + body_mix * FEEDBACK_RANGE;
     }
 
-    /// Trigger playback — crossfade with existing content (matches audio-1).
-    /// Old resonance fades out over FADE_SAMPLES while new excitation ramps in.
+    /// Trigger playback. Crossfade only if delay line has existing content.
     pub fn trigger(&mut self) {
         self.wavetable_pos = 0;
         self.wavetable_playing = self.wavetable_len > 0;
-        self.fade_remaining = FADE_SAMPLES;
+        // Only crossfade if there's existing content to fade out (retrigger).
+        // Check if delay line has energy — if so, fade; if silent, play immediately.
+        let has_content = self.delay_buf.iter().any(|s| s.abs() > 0.001);
+        self.fade_remaining = if has_content { FADE_SAMPLES } else { 0 };
     }
 
     /// Render one sample — matches audio-1 CommutedMatrixSynth with crossfade.

@@ -230,3 +230,160 @@ fn extended_params_clamping_roundtrip() {
     assert!(engine.params.modal_modes >= 4);
     assert!(engine.params.chaos_rate1 <= 30.0);
 }
+
+#[test]
+fn waveguide_plays_uploaded_wavetable() {
+    // Reproduce: waveguide should play back the uploaded wavetable data,
+    // not produce ring-mod/buzz from an empty buffer.
+    let mut engine = Engine::new(SR);
+
+    // Create a known wavetable: a decaying burst (like a convolved excitation)
+    let mut wavetable = vec![0.0f32; 4096];
+    for i in 0..4096 {
+        let t = i as f32 / 4096.0;
+        wavetable[i] = (t * 20.0 * std::f32::consts::TAU).sin() * (1.0 - t).max(0.0);
+    }
+    // Normalize
+    let peak = wavetable.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+    for s in &mut wavetable { *s *= 0.5 / peak; }
+
+    // Store it as excitation 0, body 0
+    engine.store_wavetable(0, 0, &wavetable);
+
+    // Verify it's stored
+    let stored = engine.get_wavetable_for_test(0, 0);
+    assert_eq!(stored.len(), 4096, "Wavetable should be stored with correct length");
+    assert!(stored[10].abs() > 0.001, "Wavetable should have nonzero data at index 10, got {}", stored[10]);
+
+    // Set up waveguide mode
+    let mut raw = [0.0f32; PARAM_COUNT];
+    raw[0] = 1.0; raw[3] = 0.8; // VCO defaults (unused in WG mode)
+    raw[24] = 1.0; // env2 sustain = 1.0
+    raw[33] = 1.0; // master volume
+    raw[39] = 2.0; // source_mode = waveguide
+    raw[45] = 0.0; // wg_excitation = 0
+    raw[46] = 0.0; // wg_body = 0
+    raw[47] = 0.5; // wg_brightness
+    raw[48] = 0.5; // wg_body_mix
+    engine.apply_params(&raw);
+
+    // Play a note
+    engine.note_on(60, 100);
+
+    // Render a few blocks
+    let out = render_blocks(&mut engine, 10);
+
+    // The output should contain the wavetable content, not just buzz
+    assert!(has_nonzero(&out), "Waveguide should produce output");
+    assert!(!has_nan_or_inf(&out), "No NaN/Inf");
+
+    // Check that the output resembles the wavetable (first few hundred samples
+    // should have the decaying burst character, not a constant buzz)
+    // Note: first ~100 samples silent (delay line propagation at 440Hz).
+    // Check after that.
+    let early_peak = out[200..500].iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+    let late_peak = out[2000..2256].iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+    println!("Early peak (after propagation): {early_peak}, Late peak: {late_peak}");
+
+    assert!(early_peak > 0.01, "Waveguide should produce output after delay propagation, got {early_peak}");
+    // Early burst should be louder than late sustain (wavetable decays)
+    assert!(early_peak > late_peak, "Early burst ({early_peak}) should exceed late sustain ({late_peak})");
+}
+
+#[test]
+fn waveguide_output_shape_diagnostic() {
+    let mut engine = Engine::new(SR);
+
+    // Simple decaying burst wavetable
+    let mut wavetable = vec![0.0f32; 2000];
+    for i in 0..2000 {
+        let t = i as f32 / 2000.0;
+        wavetable[i] = (t * 15.0 * std::f32::consts::TAU).sin() * (1.0 - t).powf(0.5) * 0.5;
+    }
+    engine.store_wavetable(0, 0, &wavetable);
+
+    let mut raw = [0.0f32; PARAM_COUNT];
+    raw[22] = 0.001; // env2 attack instant
+    raw[23] = 0.001; // env2 decay instant
+    raw[24] = 1.0;   // env2 sustain = full
+    raw[25] = 5.0;   // env2 release long
+    raw[33] = 1.0;   // master volume
+    raw[39] = 2.0;   // source_mode = waveguide
+    raw[45] = 0.0;   // excitation 0
+    raw[46] = 0.0;   // body 0
+    raw[47] = 0.5;   // brightness
+    raw[48] = 0.5;   // body mix
+    engine.apply_params(&raw);
+
+    engine.note_on(60, 127); // C4, full velocity
+
+    let mut buf = [0.0f32; 256]; // 128 stereo frames
+    let mut all_samples = Vec::new();
+
+    for block in 0..20 {
+        engine.render(&mut buf);
+        // Take left channel only
+        for frame in 0..128 {
+            all_samples.push(buf[frame * 2]);
+        }
+    }
+
+    // Print first 300 samples
+    println!("=== Waveguide output (first 300 mono samples) ===");
+    for (i, &s) in all_samples[..300].iter().enumerate() {
+        if i % 20 == 0 {
+            let chunk: Vec<String> = all_samples[i..std::cmp::min(i+20, 300)].iter().map(|s| format!("{:.4}", s)).collect();
+            println!("  [{:3}..{:3}]: {}", i, i+19, chunk.join(", "));
+        }
+    }
+
+    let peak = all_samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+    let first_nonzero = all_samples.iter().position(|s| s.abs() > 0.001);
+    println!("Peak: {peak:.4}, First nonzero: {:?}", first_nonzero);
+}
+
+#[test]
+fn waveguide_through_voice_diagnostic() {
+    // Test the FULL path: engine.note_on -> voice -> waveguide -> output
+    // with all default params to see what the user actually hears.
+    let mut engine = Engine::new(SR);
+
+    let mut wavetable = vec![0.0f32; 2000];
+    for i in 0..2000 {
+        let t = i as f32 / 2000.0;
+        wavetable[i] = (t * 15.0 * std::f32::consts::TAU).sin() * (1.0 - t).powf(0.5) * 0.5;
+    }
+    engine.store_wavetable(0, 0, &wavetable);
+
+    // Use the ACTUAL default params (what the UI sends)
+    let mut raw = [0.0f32; PARAM_COUNT];
+    // Copy defaults from EngineParams::default_patch()
+    raw[0] = 1.0; raw[2] = 0.5; raw[3] = 0.8; // VCO1
+    raw[4] = 1.0; raw[6] = 0.5; raw[7] = 0.8; // VCO2
+    raw[12] = 8000.0; // filter cutoff
+    raw[14] = 0.5; raw[15] = 0.5; // filter env, key
+    raw[16] = 20.0; // HPF
+    raw[17] = 0.01; raw[18] = 0.3; raw[19] = 0.6; raw[20] = 0.5; // ENV1
+    raw[22] = 0.01; raw[23] = 0.3; raw[24] = 0.7; raw[25] = 0.5; // ENV2
+    raw[26] = 5.0; // LFO rate
+    raw[32] = 3.0; // chorus mode12
+    raw[33] = 0.7; // volume
+    // Now override for waveguide
+    raw[39] = 2.0; // source_mode = WG
+    raw[47] = 0.5; raw[48] = 0.5;
+    engine.apply_params(&raw);
+
+    engine.note_on(60, 100);
+
+    let mut buf = [0.0f32; 256];
+    let mut all = Vec::new();
+    for _ in 0..20 {
+        engine.render(&mut buf);
+        for f in 0..128 { all.push(buf[f * 2]); }
+    }
+
+    let peak = all.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+    let first_nz = all.iter().position(|s| s.abs() > 0.001);
+    println!("Full path: peak={peak:.4}, first_nonzero={first_nz:?}");
+    println!("Samples 160..200: {:?}", all[160..200].iter().map(|s| format!("{:.4}", s)).collect::<Vec<_>>());
+}

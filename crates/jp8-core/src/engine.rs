@@ -133,6 +133,10 @@ impl Engine {
     }
 
     /// Get a pre-convolved wavetable by excitation and body index.
+    pub fn get_wavetable_for_test(&self, exc_idx: u8, body_idx: u8) -> &[f32] {
+        self.get_wavetable(exc_idx, body_idx)
+    }
+
     fn get_wavetable(&self, exc_idx: u8, body_idx: u8) -> &[f32] {
         let idx = (exc_idx as usize) * NUM_BODIES + (body_idx as usize);
         if idx < self.wg_cache.len() {
