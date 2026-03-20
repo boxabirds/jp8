@@ -86,11 +86,11 @@ impl Voice {
         self.filter.reset();
         self.hpf.reset();
 
-        // Waveguide source: set pitch and excite
+        // Waveguide source: set pitch and excite with real sample data
         if params.source_mode == 2 {
             self.waveguide.set_pitch(freq);
             self.waveguide.set_params(params.wg_body, params.wg_brightness, params.wg_body_mix);
-            self.waveguide.excite(params.wg_excitation, self.velocity);
+            self.waveguide.excite_commuted(params.wg_excitation, params.wg_body, self.velocity);
         }
 
         // Trigger note-based bubbles if enabled

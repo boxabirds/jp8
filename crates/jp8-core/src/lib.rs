@@ -11,5 +11,6 @@ pub mod lfo;
 pub mod math;
 pub mod oscillator;
 pub mod params;
+pub mod sample_data;
 pub mod voice;
 pub mod waveguide;
