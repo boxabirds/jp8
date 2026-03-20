@@ -177,30 +177,38 @@ impl Voice {
                 + bubble_out
         };
 
-        // Filter + VCA processing (shared by all source modes)
+        // VCA envelope (all modes)
         let env1_out = self.env1.tick();
-        let base_cutoff = params.filter_cutoff;
-        let key_track = params.filter_key_track * (self.note as f32 - 60.0) * 50.0;
-        let lfo_filter_mod = lfo * params.lfo_filter_depth * base_cutoff;
-        let chaos_filter_mod = chaos_out * params.chaos_to_filter * base_cutoff;
-        let env_mod = env1_out * params.filter_env_depth * base_cutoff;
-        let cutoff = (base_cutoff + env_mod + key_track + lfo_filter_mod + chaos_filter_mod).clamp(20.0, 20000.0);
-
-        self.filter.set_cutoff(cutoff);
-        self.filter.resonance = params.filter_resonance;
-        let filtered = self.filter.tick(mix);
-
-        self.hpf.set_cutoff(params.hpf_cutoff);
-        let hpf_out = self.hpf.tick(filtered);
-
         let env2_out = self.env2.tick();
-        let vca_env = if params.env1_to_vca {
-            env2_out * env1_out
-        } else {
-            env2_out
-        };
 
-        hpf_out * vca_env * self.velocity
+        if params.source_mode == 2 {
+            // Waveguide: bypass VCF entirely — waveguide loop filter handles tone.
+            // Just apply VCA envelope for gating.
+            mix * env2_out * self.velocity
+        } else {
+            // BLEP: full filter chain
+            let base_cutoff = params.filter_cutoff;
+            let key_track = params.filter_key_track * (self.note as f32 - 60.0) * 50.0;
+            let lfo_filter_mod = lfo * params.lfo_filter_depth * base_cutoff;
+            let chaos_filter_mod = chaos_out * params.chaos_to_filter * base_cutoff;
+            let env_mod = env1_out * params.filter_env_depth * base_cutoff;
+            let cutoff = (base_cutoff + env_mod + key_track + lfo_filter_mod + chaos_filter_mod).clamp(20.0, 20000.0);
+
+            self.filter.set_cutoff(cutoff);
+            self.filter.resonance = params.filter_resonance;
+            let filtered = self.filter.tick(mix);
+
+            self.hpf.set_cutoff(params.hpf_cutoff);
+            let hpf_out = self.hpf.tick(filtered);
+
+            let vca_env = if params.env1_to_vca {
+                env2_out * env1_out
+            } else {
+                env2_out
+            };
+
+            hpf_out * vca_env * self.velocity
+        }
     }
 
     pub fn is_active(&self) -> bool {
