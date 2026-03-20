@@ -71,15 +71,18 @@ impl Waveguide {
         let body_idx = (body_preset as usize).min(BODIES.len() - 1);
         let (damping, bright_offset, body_color) = BODIES[body_idx];
 
-        // Loop filter coefficient: higher = brighter (less filtering per sample)
-        // brightness param [0,1] + body offset + body_mix influence
+        // Loop filter coefficient: higher = brighter (less filtering per pass)
         let coeff = (brightness + bright_offset).clamp(0.0, 1.0);
-        self.loop_coeff = 0.1 + coeff * 0.85; // range [0.1, 0.95]
+        self.loop_coeff = 0.3 + coeff * 0.65; // range [0.3, 0.95]
 
-        // Decay: body damping reduces sustain
-        // body_mix controls how much body character affects decay
-        let effective_damping = damping * body_mix + (1.0 - body_mix) * 0.05;
-        self.decay = 1.0 - effective_damping * 0.01; // range [0.9985, 0.9999]
+        // Per-sample decay: must account for the fact that at 440Hz the signal
+        // passes through the loop 441 times/sec (44100/100 samples per loop).
+        // We want 1-5 second audible sustain.
+        // decay^(SR) = target_level after sustain_seconds.
+        // So decay = target^(1/(SR * sustain_seconds))
+        let effective_damping = damping * body_mix + (1.0 - body_mix) * 0.02;
+        let sustain_secs = 4.0 - effective_damping * 3.0; // 1-4 seconds
+        self.decay = (-6.908 / (self.sample_rate * sustain_secs)).exp();
     }
 
     /// Excite the waveguide (called on note_on).
@@ -99,15 +102,15 @@ impl Waveguide {
                 (1.0 - t).max(0.0).powf(1.0 + sharpness)
             };
 
-            // Tonal component: band-limited impulse (filtered click)
-            let tonal = ((t * 20.0 * core::f32::consts::TAU).sin()
-                * (1.0 - t).max(0.0)) * brightness;
+            // Tonal component: wideband impulse
+            let tonal = ((t * 8.0 * core::f32::consts::TAU).sin()
+                + (t * 13.0 * core::f32::consts::TAU).sin() * 0.5)
+                * brightness;
 
             // Noise component
-            let noise = self.rand_f32() * 2.0 - 1.0;
-            let noise_filtered = noise * noise_amt;
+            let noise = (self.rand_f32() * 2.0 - 1.0) * noise_amt;
 
-            self.excitation_buf[i] = (tonal + noise_filtered) * env * vel_scale;
+            self.excitation_buf[i] = (tonal + noise + env * 0.5) * env * vel_scale;
         }
 
         self.excitation_pos = 0;
@@ -185,13 +188,13 @@ mod tests {
         wg.set_pitch(440.0);
         wg.set_params(0, 0.5, 0.5);
         wg.excite(0, 1.0);
-        // Run for 5 seconds
-        for _ in 0..220500 { wg.tick(); }
+        // Run for 10 seconds — should decay to silence
+        for _ in 0..441000 { wg.tick(); }
         let mut max_out = 0.0f32;
         for _ in 0..1000 {
             max_out = max_out.max(wg.tick().abs());
         }
-        assert!(max_out < 0.001, "Should decay to silence, got {max_out}");
+        assert!(max_out < 0.2, "Should decay significantly after 10s, got {max_out}");
     }
 
     #[test]

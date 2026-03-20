@@ -46,6 +46,23 @@ const ARP_OPTS = [
   { label: 'U/D', value: 3 },
 ];
 
+const WG_EXCITE_OPTS = [
+  { label: 'Anvil', value: 0 },
+  { label: 'Hiss', value: 1 },
+  { label: 'Pop', value: 2 },
+  { label: 'Twang', value: 3 },
+  { label: 'Hit', value: 4 },
+  { label: 'Click', value: 5 },
+];
+
+const WG_BODY_OPTS = [
+  { label: 'Metal', value: 0 },
+  { label: 'Tube', value: 1 },
+  { label: 'Glass', value: 2 },
+  { label: 'Bell', value: 3 },
+  { label: 'Wine', value: 4 },
+];
+
 const ARP_RANGE_OPTS = [
   { label: '1', value: 1 },
   { label: '2', value: 2 },
@@ -121,28 +138,40 @@ export function JP8Panel({ engine }: JP8PanelProps) {
 
       {/* Control Sections */}
       <div style={styles.sections}>
-        <div style={{ opacity: params[P.SOURCE_MODE] !== 0 ? 0.4 : 1, transition: 'opacity 0.2s', display: 'contents' }}>
-        <Section title="VCO-1">
-          <ButtonGroup label="Wave" options={WAVE_OPTS} selected={params[P.VCO1_WAVE]} onChange={v => setP(P.VCO1_WAVE, v)} />
-          <Slider label="Range" value={params[P.VCO1_RANGE]} min={-2} max={2} step={1} onChange={v => setP(P.VCO1_RANGE, v)} />
-          <Slider label="PW" value={params[P.VCO1_PW]} min={0.05} max={0.95} step={0.01} onChange={v => setP(P.VCO1_PW, v)} />
-          <Slider label="Level" value={params[P.VCO1_LEVEL]} min={0} max={1} step={0.01} onChange={v => setP(P.VCO1_LEVEL, v)} />
-          <Slider label="Sub" value={params[P.SUB_OSC]} min={0} max={1} step={0.01} onChange={v => setP(P.SUB_OSC, v)} />
-        </Section>
-        <Divider />
-        <Section title="VCO-2">
-          <ButtonGroup label="Wave" options={WAVE_OPTS} selected={params[P.VCO2_WAVE]} onChange={v => setP(P.VCO2_WAVE, v)} />
-          <Slider label="Range" value={params[P.VCO2_RANGE]} min={-2} max={2} step={1} onChange={v => setP(P.VCO2_RANGE, v)} />
-          <Slider label="PW" value={params[P.VCO2_PW]} min={0.05} max={0.95} step={0.01} onChange={v => setP(P.VCO2_PW, v)} />
-          <Slider label="Level" value={params[P.VCO2_LEVEL]} min={0} max={1} step={0.01} onChange={v => setP(P.VCO2_LEVEL, v)} />
-          <Slider label="Detune" value={params[P.VCO2_DETUNE]} min={-1} max={1} step={0.01} onChange={v => setP(P.VCO2_DETUNE, v)} />
-        </Section>
-        <Divider />
-        <Section title="MIX">
-          <Slider label="X-Mod" value={params[P.CROSS_MOD]} min={0} max={1} step={0.01} onChange={v => setP(P.CROSS_MOD, v)} />
-          <Slider label="Noise" value={params[P.NOISE]} min={0} max={1} step={0.01} onChange={v => setP(P.NOISE, v)} />
-        </Section>
-        </div>
+        {params[P.SOURCE_MODE] === 2 ? (
+          <>
+          <Section title="WAVEGUIDE">
+            <ButtonGroup label="Excite" options={WG_EXCITE_OPTS} selected={params[P.WG_EXCITATION]} onChange={v => setP(P.WG_EXCITATION, v)} />
+            <ButtonGroup label="Body" options={WG_BODY_OPTS} selected={params[P.WG_BODY]} onChange={v => setP(P.WG_BODY, v)} />
+            <Slider label="Bright" value={params[P.WG_BRIGHTNESS]} min={0} max={1} step={0.01} onChange={v => setP(P.WG_BRIGHTNESS, v)} />
+            <Slider label="Body" value={params[P.WG_BODY_MIX]} min={0} max={1} step={0.01} onChange={v => setP(P.WG_BODY_MIX, v)} />
+            <Slider label="Noise" value={params[P.NOISE]} min={0} max={1} step={0.01} onChange={v => setP(P.NOISE, v)} />
+          </Section>
+          </>
+        ) : (
+          <>
+          <Section title="VCO-1">
+            <ButtonGroup label="Wave" options={WAVE_OPTS} selected={params[P.VCO1_WAVE]} onChange={v => setP(P.VCO1_WAVE, v)} />
+            <Slider label="Range" value={params[P.VCO1_RANGE]} min={-2} max={2} step={1} onChange={v => setP(P.VCO1_RANGE, v)} />
+            <Slider label="PW" value={params[P.VCO1_PW]} min={0.05} max={0.95} step={0.01} onChange={v => setP(P.VCO1_PW, v)} />
+            <Slider label="Level" value={params[P.VCO1_LEVEL]} min={0} max={1} step={0.01} onChange={v => setP(P.VCO1_LEVEL, v)} />
+            <Slider label="Sub" value={params[P.SUB_OSC]} min={0} max={1} step={0.01} onChange={v => setP(P.SUB_OSC, v)} />
+          </Section>
+          <Divider />
+          <Section title="VCO-2">
+            <ButtonGroup label="Wave" options={WAVE_OPTS} selected={params[P.VCO2_WAVE]} onChange={v => setP(P.VCO2_WAVE, v)} />
+            <Slider label="Range" value={params[P.VCO2_RANGE]} min={-2} max={2} step={1} onChange={v => setP(P.VCO2_RANGE, v)} />
+            <Slider label="PW" value={params[P.VCO2_PW]} min={0.05} max={0.95} step={0.01} onChange={v => setP(P.VCO2_PW, v)} />
+            <Slider label="Level" value={params[P.VCO2_LEVEL]} min={0} max={1} step={0.01} onChange={v => setP(P.VCO2_LEVEL, v)} />
+            <Slider label="Detune" value={params[P.VCO2_DETUNE]} min={-1} max={1} step={0.01} onChange={v => setP(P.VCO2_DETUNE, v)} />
+          </Section>
+          <Divider />
+          <Section title="MIX">
+            <Slider label="X-Mod" value={params[P.CROSS_MOD]} min={0} max={1} step={0.01} onChange={v => setP(P.CROSS_MOD, v)} />
+            <Slider label="Noise" value={params[P.NOISE]} min={0} max={1} step={0.01} onChange={v => setP(P.NOISE, v)} />
+          </Section>
+          </>
+        )}
         <Divider />
         <Section title="HPF">
           <Slider label="Freq" value={params[P.HPF_CUTOFF]} min={20} max={6000} step={5} onChange={v => setP(P.HPF_CUTOFF, v)} displayValue={`${Math.round(params[P.HPF_CUTOFF])}`} />

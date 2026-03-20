@@ -144,7 +144,8 @@ impl Voice {
         // Source dispatch: BLEP oscillators or waveguide
         let mix = if params.source_mode == 2 {
             // Waveguide source — replaces VCO1+VCO2
-            let wg_out = self.waveguide.tick();
+            // Boost to match VCO output levels (~0.8 per VCO)
+            let wg_out = self.waveguide.tick() * 3.0;
             wg_out + noise_out * params.noise_level + bubble_out
         } else {
             // BLEP oscillators (default, source_mode == 0)
