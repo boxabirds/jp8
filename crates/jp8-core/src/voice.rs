@@ -144,8 +144,7 @@ impl Voice {
         // Source dispatch: BLEP oscillators or waveguide
         let mix = if params.source_mode == 2 {
             // Waveguide source — replaces VCO1+VCO2
-            // Boost to match VCO output levels (~0.8 per VCO)
-            let wg_out = self.waveguide.tick() * 3.0;
+            let wg_out = self.waveguide.tick();
             wg_out + noise_out * params.noise_level + bubble_out
         } else {
             // BLEP oscillators (default, source_mode == 0)
@@ -178,7 +177,7 @@ impl Voice {
                 + bubble_out
         };
 
-        // ENV-1 → filter cutoff modulation
+        // Filter + VCA processing (shared by all source modes)
         let env1_out = self.env1.tick();
         let base_cutoff = params.filter_cutoff;
         let key_track = params.filter_key_track * (self.note as f32 - 60.0) * 50.0;
@@ -191,11 +190,9 @@ impl Voice {
         self.filter.resonance = params.filter_resonance;
         let filtered = self.filter.tick(mix);
 
-        // HPF post-VCF
         self.hpf.set_cutoff(params.hpf_cutoff);
         let hpf_out = self.hpf.tick(filtered);
 
-        // VCA: ENV-2 controls amplitude for all source modes
         let env2_out = self.env2.tick();
         let vca_env = if params.env1_to_vca {
             env2_out * env1_out

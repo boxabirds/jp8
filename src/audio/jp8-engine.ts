@@ -95,7 +95,9 @@ export class JP8Engine {
       this.setStatus('ready');
 
       // Pre-convolve waveguide wavetables in background (non-blocking)
-      this.loadWaveguideWavetables();
+      this.loadWaveguideWavetables().then(() => {
+        console.log('[JP8] All waveguide wavetables loaded');
+      });
     } catch (err) {
       console.error('JP8 start failed:', err);
       this.setStatus('error');
