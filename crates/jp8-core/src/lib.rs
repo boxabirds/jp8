@@ -1,8 +1,11 @@
 pub mod allocator;
 pub mod arpeggiator;
+extern crate alloc;
+
 pub mod benjolin;
 pub mod bubble;
 pub mod chorus;
+pub mod convolver;
 pub mod modal;
 pub mod engine;
 pub mod envelope;

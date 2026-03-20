@@ -26,6 +26,12 @@ export function get_output_ptr(id: number): number;
  */
 export function get_param_ptr(id: number): number;
 
+/**
+ * Initialize the wavetable cache for waveguide mode.
+ * Called separately so engine creation is fast; cache is computed in background.
+ */
+export function init_wavetable_cache(id: number): void;
+
 export function note_off(id: number, note: number): void;
 
 export function note_on(id: number, note: number, velocity: number): void;
@@ -47,6 +53,7 @@ export interface InitOutput {
     readonly get_output_len: () => number;
     readonly get_output_ptr: (a: number) => number;
     readonly get_param_ptr: (a: number) => number;
+    readonly init_wavetable_cache: (a: number) => void;
     readonly note_off: (a: number, b: number) => void;
     readonly note_on: (a: number, b: number, c: number) => void;
     readonly render: (a: number) => void;

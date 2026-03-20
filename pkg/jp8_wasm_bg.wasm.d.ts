@@ -9,6 +9,7 @@ export const get_active_voice_count: (a: number) => number;
 export const get_output_len: () => number;
 export const get_output_ptr: (a: number) => number;
 export const get_param_ptr: (a: number) => number;
+export const init_wavetable_cache: (a: number) => void;
 export const note_off: (a: number, b: number) => void;
 export const note_on: (a: number, b: number, c: number) => void;
 export const render: (a: number) => void;

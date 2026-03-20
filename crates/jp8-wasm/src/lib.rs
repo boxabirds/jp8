@@ -7,6 +7,7 @@ const MAX_ENGINES: usize = 8;
 const BLOCK_FRAMES: usize = 128;
 const CHANNELS: usize = 2;
 const OUTPUT_BUF_LEN: usize = BLOCK_FRAMES * CHANNELS;
+const MAX_WAVETABLE: usize = 16384;
 
 /// Multiple engines, each with its own output and param buffers.
 /// All pre-allocated — zero heap allocs after init.
@@ -27,6 +28,13 @@ pub fn create_engine(id: usize, sample_rate: f32) {
     if id < MAX_ENGINES {
         unsafe { ENGINES[id] = Some(Engine::new(sample_rate)); }
     }
+}
+
+/// Initialize the wavetable cache for waveguide mode.
+/// Called separately so engine creation is fast; cache is computed in background.
+#[wasm_bindgen]
+pub fn init_wavetable_cache(id: usize) {
+    with_engine(id, |e| e.init_wavetable_cache());
 }
 
 #[wasm_bindgen]
@@ -94,3 +102,4 @@ pub fn all_notes_off(id: usize) {
 pub fn get_active_voice_count(id: usize) -> u32 {
     with_engine(id, |e| e.voices_active_count()).unwrap_or(0)
 }
+

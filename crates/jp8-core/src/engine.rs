@@ -1,17 +1,25 @@
 /// Top-level JP-8 engine.
 /// Global LFO (single phase shared across all voices, per the real JP-8).
 
+extern crate alloc;
+use alloc::vec::Vec;
+
 use crate::allocator::VoiceAllocator;
 use crate::arpeggiator::{ArpMode, Arpeggiator};
 use crate::benjolin::Benjolin;
 use crate::bubble::BubbleOscillator;
 use crate::chorus::{ChorusMode, StereoChorus};
+use crate::convolver;
 use crate::modal::ModalResonator;
 use crate::lfo::{Lfo, LfoWave};
 use crate::params::{EngineParams, PARAM_COUNT};
 use crate::voice::Voice;
 
 const NUM_VOICES: usize = 8;
+
+const MAX_WAVETABLE: usize = 16384;
+const WAVETABLE_FADE: usize = 512;
+const WAVETABLE_NORMALIZE: f32 = 0.5;
 
 pub struct Engine {
     voices: [Voice; NUM_VOICES],
@@ -23,6 +31,9 @@ pub struct Engine {
     pub params: EngineParams,
     lfo: Lfo,
     benjolin: Benjolin,
+    /// Pre-convolved wavetable cache: [excitation_idx][body_idx]
+    wg_cache: Vec<Vec<f32>>,
+    wg_cache_ready: bool,
     sample_rate: f32,
     inv_sample_rate: f32,
 }
@@ -40,6 +51,8 @@ impl Engine {
             params: EngineParams::default_patch(),
             lfo: Lfo::new(),
             benjolin: Benjolin::new(),
+            wg_cache: Vec::new(),
+            wg_cache_ready: false,
             sample_rate,
             inv_sample_rate: 1.0 / sample_rate,
         }
@@ -69,9 +82,25 @@ impl Engine {
     }
 
     fn trigger_voice(&mut self, note: u8, velocity: u8) {
+        // Get wavetable for waveguide mode (before borrowing voices)
+        let wg_wavetable = if self.params.source_mode == 2 && self.wg_cache_ready {
+            Some(self.get_wavetable(self.params.wg_excitation, self.params.wg_body).as_ptr())
+        } else {
+            None
+        };
+        let wg_len = if self.params.source_mode == 2 && self.wg_cache_ready {
+            self.get_wavetable(self.params.wg_excitation, self.params.wg_body).len()
+        } else {
+            0
+        };
+
         if self.params.assign_mode == 2 {
             for (i, voice) in self.voices.iter_mut().enumerate() {
                 voice.note_on(note, velocity, &self.params);
+                if let Some(ptr) = wg_wavetable {
+                    let data = unsafe { core::slice::from_raw_parts(ptr, wg_len) };
+                    voice.waveguide.set_wavetable(data);
+                }
                 let detune = (i as f32 - 3.5) * self.voice_allocator.unison_detune * 0.1;
                 let factor = 2.0f32.powf(detune / 12.0);
                 voice.vco1.target_freq *= factor;
@@ -83,6 +112,10 @@ impl Engine {
         } else {
             let idx = self.voice_allocator.note_on(note);
             self.voices[idx].note_on(note, velocity, &self.params);
+            if let Some(ptr) = wg_wavetable {
+                let data = unsafe { core::slice::from_raw_parts(ptr, wg_len) };
+                self.voices[idx].waveguide.set_wavetable(data);
+            }
         }
     }
 
@@ -91,6 +124,43 @@ impl Engine {
         let count = self.voice_allocator.note_off(note, &mut released);
         for i in 0..count {
             self.voices[released[i]].note_off();
+        }
+    }
+
+    /// Pre-compute all 30 excitation × body convolutions.
+    /// Called once at init time. Cost: ~30 FFT convolutions.
+    pub fn init_wavetable_cache(&mut self) {
+        use crate::sample_data;
+
+        let num_exc = sample_data::NUM_EXCITATIONS;
+        let num_bod = sample_data::NUM_BODIES;
+        let total = num_exc * num_bod;
+
+        self.wg_cache = Vec::with_capacity(total);
+
+        for exc_idx in 0..num_exc {
+            for body_idx in 0..num_bod {
+                let exc = sample_data::EXCITATIONS[exc_idx];
+                let body = sample_data::BODIES[body_idx];
+                let wavetable = convolver::convolve_and_prepare(
+                    exc, body, MAX_WAVETABLE, WAVETABLE_FADE, WAVETABLE_NORMALIZE,
+                );
+                self.wg_cache.push(wavetable);
+            }
+        }
+
+        self.wg_cache_ready = true;
+    }
+
+    /// Get a pre-convolved wavetable by excitation and body index.
+    pub fn get_wavetable(&self, exc_idx: u8, body_idx: u8) -> &[f32] {
+        if !self.wg_cache_ready { return &[]; }
+        use crate::sample_data;
+        let idx = (exc_idx as usize) * sample_data::NUM_BODIES + (body_idx as usize);
+        if idx < self.wg_cache.len() {
+            &self.wg_cache[idx]
+        } else {
+            &[]
         }
     }
 

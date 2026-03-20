@@ -8,6 +8,7 @@
 
 import init, {
   create_engine,
+  init_wavetable_cache,
   render,
   get_output_ptr,
   get_output_len,
@@ -88,8 +89,9 @@ class JP8Processor extends AudioWorkletProcessor {
     try {
       await ensureWasmInit(wasmModule);
 
-      // Create this instance's engine in the shared WASM module
+      // Create this instance's engine and pre-compute waveguide wavetables
       create_engine(this.engineId, sampleRate);
+      init_wavetable_cache(this.engineId);
 
       // Get pointers to this engine's pre-allocated buffers
       const outputPtr = get_output_ptr(this.engineId) as unknown as number;

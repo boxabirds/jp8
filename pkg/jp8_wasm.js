@@ -68,6 +68,15 @@ export function get_param_ptr(id) {
 }
 
 /**
+ * Initialize the wavetable cache for waveguide mode.
+ * Called separately so engine creation is fast; cache is computed in background.
+ * @param {number} id
+ */
+export function init_wavetable_cache(id) {
+    wasm.init_wavetable_cache(id);
+}
+
+/**
  * @param {number} id
  * @param {number} note
  */
