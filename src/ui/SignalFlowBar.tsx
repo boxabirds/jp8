@@ -30,7 +30,8 @@ export function SignalFlowBar({ params, setP }: SignalFlowBarProps) {
 
   const handleSourceChange = useCallback((value: number) => {
     setP(P.SOURCE_MODE, value);
-    if (value !== 0) {
+    // Only SPEC opens a tray (WG controls are inline in the sections)
+    if (value === 1) {
       setExpandedBlock('source');
     } else if (expandedBlock === 'source') {
       setExpandedBlock(null);
