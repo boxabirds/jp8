@@ -11,6 +11,7 @@ const MAX_WAVETABLE: usize = 16384;
 const FEEDBACK_MIN: f32 = 0.995;
 const FEEDBACK_RANGE: f32 = 0.0049;
 const DENORMAL_BIAS: f32 = 1.0e-25;
+const FADE_SAMPLES: usize = 128; // ~2.7ms crossfade on retrigger
 
 pub struct Waveguide {
     wavetable: Vec<f32>,
@@ -23,6 +24,7 @@ pub struct Waveguide {
     loop_filter_state: f32,
     filter_coeff: f32,
     feedback: f32,
+    fade_remaining: usize, // crossfade counter on retrigger
     sample_rate: f32,
 }
 
@@ -39,6 +41,7 @@ impl Waveguide {
             loop_filter_state: 0.0,
             filter_coeff: 0.5,
             feedback: 0.997,
+            fade_remaining: 0,
             sample_rate,
         }
     }
@@ -62,22 +65,19 @@ impl Waveguide {
         self.feedback = FEEDBACK_MIN + body_mix * FEEDBACK_RANGE;
     }
 
-    /// Trigger playback — soft-fade existing delay content (matches audio-1).
+    /// Trigger playback — crossfade with existing content (matches audio-1).
+    /// Old resonance fades out over FADE_SAMPLES while new excitation ramps in.
     pub fn trigger(&mut self) {
         self.wavetable_pos = 0;
         self.wavetable_playing = self.wavetable_len > 0;
-        // Soft fade instead of hard zero — avoids click
-        for s in self.delay_buf.iter_mut() {
-            *s *= 0.05;
-        }
-        self.loop_filter_state *= 0.05;
+        self.fade_remaining = FADE_SAMPLES;
     }
 
-    /// Render one sample — exact audio-1 CommutedMatrixSynth topology.
+    /// Render one sample — matches audio-1 CommutedMatrixSynth with crossfade.
     #[inline(always)]
     pub fn tick(&mut self) -> f32 {
-        // Read excitation from wavetable
-        let excitation = if self.wavetable_playing && self.wavetable_pos < self.wavetable_len {
+        // Read raw excitation from wavetable
+        let raw_excitation = if self.wavetable_playing && self.wavetable_pos < self.wavetable_len {
             let val = self.wavetable[self.wavetable_pos];
             self.wavetable_pos += 1;
             if self.wavetable_pos >= self.wavetable_len {
@@ -88,6 +88,15 @@ impl Waveguide {
             0.0
         };
 
+        // Crossfade on retrigger: ramp excitation in, reduce feedback to let old die
+        let (excitation, feedback_scale) = if self.fade_remaining > 0 {
+            let t = self.fade_remaining as f32 / FADE_SAMPLES as f32;
+            self.fade_remaining -= 1;
+            (raw_excitation * (1.0 - t), t * 0.3) // ramp 0→1, feedback 1→0.3
+        } else {
+            (raw_excitation, 1.0)
+        };
+
         // Read from delay line
         let read_pos = (self.delay_write + MAX_DELAY - self.delay_length) % MAX_DELAY;
         let delayed = self.delay_buf[read_pos];
@@ -96,9 +105,9 @@ impl Waveguide {
         self.loop_filter_state = delayed * (1.0 - self.filter_coeff)
             + self.loop_filter_state * self.filter_coeff;
 
-        // Write: excitation + filtered feedback
+        // Write: excitation + filtered feedback (scaled during crossfade)
         self.delay_buf[self.delay_write] =
-            excitation + self.loop_filter_state * self.feedback + DENORMAL_BIAS;
+            excitation + self.loop_filter_state * self.feedback * feedback_scale + DENORMAL_BIAS;
         self.delay_write = (self.delay_write + 1) % MAX_DELAY;
 
         delayed

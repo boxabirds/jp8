@@ -17,8 +17,8 @@ use crate::voice::Voice;
 
 const NUM_VOICES: usize = 8;
 
-const MAX_WAVETABLE: usize = 16384;
-const WAVETABLE_FADE: usize = 512;
+const MAX_WAVETABLE: usize = 8192; // matches audio-1
+const WAVETABLE_TAPER_RATIO: f32 = 0.4; // cosine taper over last 40%
 const WAVETABLE_NORMALIZE: f32 = 0.5;
 
 pub struct Engine {
@@ -142,8 +142,9 @@ impl Engine {
             for body_idx in 0..num_bod {
                 let exc = sample_data::EXCITATIONS[exc_idx];
                 let body = sample_data::BODIES[body_idx];
+                let taper_samples = (MAX_WAVETABLE as f32 * WAVETABLE_TAPER_RATIO) as usize;
                 let wavetable = convolver::convolve_and_prepare(
-                    exc, body, MAX_WAVETABLE, WAVETABLE_FADE, WAVETABLE_NORMALIZE,
+                    exc, body, MAX_WAVETABLE, taper_samples, WAVETABLE_NORMALIZE,
                 );
                 self.wg_cache.push(wavetable);
             }
