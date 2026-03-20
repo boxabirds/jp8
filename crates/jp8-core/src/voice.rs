@@ -195,15 +195,20 @@ impl Voice {
         self.hpf.set_cutoff(params.hpf_cutoff);
         let hpf_out = self.hpf.tick(filtered);
 
-        // VCA: ENV-2, optionally mixed with ENV-1
-        let env2_out = self.env2.tick();
-        let vca_env = if params.env1_to_vca {
-            env2_out * env1_out
+        // VCA: waveguide handles its own decay, so bypass ENV-2
+        if params.source_mode == 2 {
+            // Still tick ENV-2 so is_active() eventually returns false (voice cleanup)
+            self.env2.tick();
+            hpf_out * self.velocity
         } else {
-            env2_out
-        };
-
-        hpf_out * vca_env * self.velocity
+            let env2_out = self.env2.tick();
+            let vca_env = if params.env1_to_vca {
+                env2_out * env1_out
+            } else {
+                env2_out
+            };
+            hpf_out * vca_env * self.velocity
+        }
     }
 
     pub fn is_active(&self) -> bool {

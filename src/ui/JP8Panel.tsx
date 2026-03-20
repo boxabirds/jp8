@@ -184,20 +184,26 @@ export function JP8Panel({ engine }: JP8PanelProps) {
           <Slider label="Key" value={params[P.FILTER_KEY]} min={0} max={1} step={0.01} onChange={v => setP(P.FILTER_KEY, v)} />
         </Section>
         <Divider />
-        <Section title="ENV-1">
+        <Section title={params[P.SOURCE_MODE] === 2 ? 'FILTER ENV' : 'ENV-1'}>
           <Slider label="A" value={params[P.ENV1_A]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV1_A, v)} />
           <Slider label="D" value={params[P.ENV1_D]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV1_D, v)} />
           <Slider label="S" value={params[P.ENV1_S]} min={0} max={1} step={0.01} onChange={v => setP(P.ENV1_S, v)} />
           <Slider label="R" value={params[P.ENV1_R]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV1_R, v)} />
-          <ButtonGroup label="→VCA" options={[{label:'OFF',value:0},{label:'ON',value:1}]} selected={params[P.ENV1_VCA]} onChange={v => setP(P.ENV1_VCA, v)} />
+          {params[P.SOURCE_MODE] !== 2 && (
+            <ButtonGroup label="→VCA" options={[{label:'OFF',value:0},{label:'ON',value:1}]} selected={params[P.ENV1_VCA]} onChange={v => setP(P.ENV1_VCA, v)} />
+          )}
         </Section>
-        <Divider />
-        <Section title="ENV-2">
-          <Slider label="A" value={params[P.ENV2_A]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_A, v)} />
-          <Slider label="D" value={params[P.ENV2_D]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_D, v)} />
-          <Slider label="S" value={params[P.ENV2_S]} min={0} max={1} step={0.01} onChange={v => setP(P.ENV2_S, v)} />
-          <Slider label="R" value={params[P.ENV2_R]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_R, v)} />
-        </Section>
+        {params[P.SOURCE_MODE] !== 2 && (
+          <>
+          <Divider />
+          <Section title="ENV-2">
+            <Slider label="A" value={params[P.ENV2_A]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_A, v)} />
+            <Slider label="D" value={params[P.ENV2_D]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_D, v)} />
+            <Slider label="S" value={params[P.ENV2_S]} min={0} max={1} step={0.01} onChange={v => setP(P.ENV2_S, v)} />
+            <Slider label="R" value={params[P.ENV2_R]} min={0.001} max={10} step={0.001} onChange={v => setP(P.ENV2_R, v)} />
+          </Section>
+          </>
+        )}
         <Divider />
         <Section title="LFO">
           <ButtonGroup label="Wave" options={LFO_OPTS} selected={params[P.LFO_WAVE]} onChange={v => setP(P.LFO_WAVE, v)} />
