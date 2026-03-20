@@ -1,0 +1,17 @@
+#!/bin/bash
+# Pre-commit hook: reject any use of 'unsafe' in Rust files.
+
+UNSAFE_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' | xargs grep -l '\bunsafe\b' 2>/dev/null)
+
+if [ -n "$UNSAFE_FILES" ]; then
+    echo "ERROR: 'unsafe' found in staged Rust files:"
+    echo ""
+    for f in $UNSAFE_FILES; do
+        grep -n '\bunsafe\b' "$f" | while read line; do
+            echo "  $f:$line"
+        done
+    done
+    echo ""
+    echo "Remove all unsafe code before committing."
+    exit 1
+fi

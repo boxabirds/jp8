@@ -351,24 +351,6 @@ impl Engine {
         }
     }
 
-    /// Test tone: pure 440 Hz sine, bypasses all DSP. For debugging audio path.
-    pub fn render_test_tone(&mut self, output: &mut [f32]) {
-        let frames = output.len() / 2;
-        let inv_sr = self.inv_sample_rate;
-        static mut TEST_PHASE: f32 = 0.0;
-
-        for frame in 0..frames {
-            let phase = unsafe { TEST_PHASE };
-            let sample = (phase * core::f32::consts::TAU).sin() * 0.3;
-            let idx = frame * 2;
-            output[idx] = sample;
-            output[idx + 1] = sample;
-            unsafe {
-                TEST_PHASE += 440.0 * inv_sr;
-                if TEST_PHASE >= 1.0 { TEST_PHASE -= 1.0; }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
