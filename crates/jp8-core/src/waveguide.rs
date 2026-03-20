@@ -7,7 +7,8 @@
 use crate::sample_data;
 
 const MAX_DELAY: usize = 2048; // supports down to ~21 Hz at 44.1kHz
-const EXCITATION_LEN: usize = sample_data::SAMPLE_LEN; // 512 samples from real recordings
+const EXCITATION_LEN: usize = sample_data::SAMPLE_LEN; // 4096 samples from real recordings
+const CONV_KERNEL_LEN: usize = 512; // use first 512 samples of body IR for convolution
 
 /// Body preset characteristics for the loop filter.
 /// (damping, brightness_offset)
@@ -91,16 +92,14 @@ impl Waveguide {
         let body = sample_data::BODIES[body_idx];
         let vel_scale = 0.3 + velocity * 0.7;
 
-        // Real time-domain convolution: output[n] = sum(exc[k] * body[n-k])
-        // Truncated to EXCITATION_LEN samples (the delay line handles sustain).
-        // Cost: 512×512 = ~262K multiplies, but only runs once per note_on.
+        // Commuted synthesis convolution: convolve excitation with body IR kernel.
+        // Uses first CONV_KERNEL_LEN samples of body (captures modal onset).
+        // Cost: 4096 × 512 = ~2M multiplies, runs once per note_on only.
         for n in 0..EXCITATION_LEN {
             let mut sum = 0.0f32;
-            let k_max = (n + 1).min(EXCITATION_LEN);
+            let k_max = (n + 1).min(CONV_KERNEL_LEN);
             for k in 0..k_max {
-                if n >= k {
-                    sum += exc[k] * body[n - k];
-                }
+                sum += exc[n - k] * body[k];
             }
             self.excitation_buf[n] = sum * vel_scale;
         }
