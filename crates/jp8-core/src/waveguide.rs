@@ -25,8 +25,8 @@ pub struct Waveguide {
     write_pos: usize,
     delay_len: usize,
     loop_filter_state: f32,
-    loop_coeff: f32,
-    decay: f32,
+    filter_coeff: f32,   // 0=bright, 1=dark (matches audio-1)
+    feedback: f32,        // 0.9-0.999 (sustain/decay)
     excitation_buf: [f32; EXCITATION_LEN],
     excitation_pos: usize,
     sample_rate: f32,
@@ -39,8 +39,8 @@ impl Waveguide {
             write_pos: 0,
             delay_len: 100,
             loop_filter_state: 0.0,
-            loop_coeff: 0.5,
-            decay: 0.9999,
+            filter_coeff: 0.5,
+            feedback: 0.995,
             excitation_buf: [0.0; EXCITATION_LEN],
             excitation_pos: EXCITATION_LEN,
             sample_rate,
@@ -56,11 +56,15 @@ impl Waveguide {
         let body_idx = (body_preset as usize).min(BODY_PARAMS.len() - 1);
         let (damping, bright_offset) = BODY_PARAMS[body_idx];
 
+        // filter_coeff: 0 = bright (no filtering), 1 = dark (heavy filtering)
+        // Matches audio-1: filter_coeff = 1.0 - brightness * 0.95
         let coeff = (brightness + bright_offset).clamp(0.0, 1.0);
-        self.loop_coeff = 0.3 + coeff * 0.65;
+        self.filter_coeff = 1.0 - coeff * 0.95;
 
+        // Feedback: how much of the filtered signal feeds back into the delay
+        // Higher = longer sustain. Range 0.9 - 0.999
         let effective_damping = damping * body_mix + (1.0 - body_mix) * 0.01;
-        self.decay = 1.0 - effective_damping * 0.00002;
+        self.feedback = (0.999 - effective_damping * 0.1).clamp(0.9, 0.999);
     }
 
     /// Excite the waveguide with real sample data (called on note_on).
@@ -129,11 +133,10 @@ impl Waveguide {
         self.loop_filter_state = 0.0;
     }
 
+    /// Render one sample — matches audio-1's CommutedMatrixSynth topology.
     #[inline(always)]
     pub fn tick(&mut self) -> f32 {
-        let read_pos = (self.write_pos + MAX_DELAY - self.delay_len) % MAX_DELAY;
-        let delayed = self.delay_line[read_pos];
-
+        // Read excitation wavetable
         let excitation = if self.excitation_pos < EXCITATION_LEN {
             let e = self.excitation_buf[self.excitation_pos];
             self.excitation_pos += 1;
@@ -142,17 +145,22 @@ impl Waveguide {
             0.0
         };
 
-        // One-pole loop filter
-        let filtered = self.loop_coeff * (delayed + excitation)
-            + (1.0 - self.loop_coeff) * self.loop_filter_state;
-        self.loop_filter_state = filtered;
+        // Read from delay line
+        let read_pos = (self.write_pos + MAX_DELAY - self.delay_len) % MAX_DELAY;
+        let delayed = self.delay_line[read_pos];
 
-        let output = filtered * self.decay;
+        // One-pole loop filter on the DELAYED signal only (not excitation)
+        // This preserves the excitation's attack brightness
+        self.loop_filter_state = delayed * (1.0 - self.filter_coeff)
+            + self.loop_filter_state * self.filter_coeff;
 
-        self.delay_line[self.write_pos] = output;
+        // Write back: excitation + filtered feedback
+        self.delay_line[self.write_pos] =
+            excitation + self.loop_filter_state * self.feedback;
         self.write_pos = (self.write_pos + 1) % MAX_DELAY;
 
-        output
+        // Output is the delayed signal (before filtering)
+        delayed
     }
 
     pub fn reset(&mut self) {
