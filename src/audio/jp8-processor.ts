@@ -14,6 +14,8 @@ import init, {
   get_param_ptr,
   get_wavetable_ptr,
   store_wavetable,
+  debug_wavetable_peak,
+  debug_wavetable_len,
   apply_params_from_buf,
   note_on,
   note_off,
@@ -134,9 +136,11 @@ class JP8Processor extends AudioWorkletProcessor {
           const view = new Float32Array(wasmMemory.buffer, ptr, cmd.data.length);
           view.set(cmd.data);
           store_wavetable(this.engineId, cmd.excIdx, cmd.bodyIdx, cmd.data.length);
-          // Verify data has content
-          const peak = cmd.data.reduce((max, s) => Math.max(max, Math.abs(s)), 0);
-          console.log(`[JP8] Uploaded wavetable exc=${cmd.excIdx} body=${cmd.bodyIdx} len=${cmd.data.length} peak=${peak.toFixed(4)}`);
+          // Verify round-trip: check what Rust actually stored
+          const rustPeak = debug_wavetable_peak(this.engineId, cmd.excIdx, cmd.bodyIdx);
+          const rustLen = debug_wavetable_len(this.engineId, cmd.excIdx, cmd.bodyIdx);
+          const jsPeak = cmd.data.reduce((max: number, s: number) => Math.max(max, Math.abs(s)), 0);
+          console.log(`[JP8] Uploaded exc=${cmd.excIdx} body=${cmd.bodyIdx} jsLen=${cmd.data.length} jsPeak=${jsPeak.toFixed(4)} rustLen=${rustLen} rustPeak=${rustPeak.toFixed(4)}`);
         } else {
           console.warn(`[JP8] Failed to upload wavetable: ptr=${ptr} memory=${!!wasmMemory}`);
         }

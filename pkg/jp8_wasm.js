@@ -23,6 +23,30 @@ export function create_engine(id, sample_rate) {
 }
 
 /**
+ * Diagnostic: return the length of a stored wavetable.
+ * @param {number} id
+ * @param {number} exc_idx
+ * @param {number} body_idx
+ * @returns {number}
+ */
+export function debug_wavetable_len(id, exc_idx, body_idx) {
+    const ret = wasm.debug_wavetable_len(id, exc_idx, body_idx);
+    return ret >>> 0;
+}
+
+/**
+ * Diagnostic: return the peak value of a stored wavetable.
+ * @param {number} id
+ * @param {number} exc_idx
+ * @param {number} body_idx
+ * @returns {number}
+ */
+export function debug_wavetable_peak(id, exc_idx, body_idx) {
+    const ret = wasm.debug_wavetable_peak(id, exc_idx, body_idx);
+    return ret;
+}
+
+/**
  * @param {number} id
  */
 export function destroy_engine(id) {

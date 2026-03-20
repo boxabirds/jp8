@@ -109,3 +109,20 @@ pub fn store_wavetable(id: usize, exc_idx: u8, body_idx: u8, len: usize) {
     let buf = unsafe { &WAVETABLE_BUF[id][..actual_len] };
     with_engine(id, |e| e.store_wavetable(exc_idx, body_idx, buf));
 }
+
+/// Diagnostic: return the peak value of a stored wavetable.
+#[wasm_bindgen]
+pub fn debug_wavetable_peak(id: usize, exc_idx: u8, body_idx: u8) -> f32 {
+    with_engine(id, |e| {
+        let wt = e.get_wavetable_for_test(exc_idx, body_idx);
+        wt.iter().map(|s| s.abs()).fold(0.0f32, f32::max)
+    }).unwrap_or(-1.0)
+}
+
+/// Diagnostic: return the length of a stored wavetable.
+#[wasm_bindgen]
+pub fn debug_wavetable_len(id: usize, exc_idx: u8, body_idx: u8) -> usize {
+    with_engine(id, |e| {
+        e.get_wavetable_for_test(exc_idx, body_idx).len()
+    }).unwrap_or(0)
+}

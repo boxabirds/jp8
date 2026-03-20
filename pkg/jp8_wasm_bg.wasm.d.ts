@@ -4,6 +4,8 @@ export const memory: WebAssembly.Memory;
 export const all_notes_off: (a: number) => void;
 export const apply_params_from_buf: (a: number) => void;
 export const create_engine: (a: number, b: number) => void;
+export const debug_wavetable_len: (a: number, b: number, c: number) => number;
+export const debug_wavetable_peak: (a: number, b: number, c: number) => number;
 export const destroy_engine: (a: number) => void;
 export const get_active_voice_count: (a: number) => number;
 export const get_output_len: () => number;

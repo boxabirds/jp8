@@ -80,20 +80,17 @@ impl Engine {
     }
 
     fn trigger_voice(&mut self, note: u8, velocity: u8) {
-        // Get wavetable for waveguide mode (before borrowing voices)
-        let wt = self.get_wavetable(self.params.wg_excitation, self.params.wg_body);
-        let wg_wavetable = if self.params.source_mode == 2 && !wt.is_empty() {
-            Some(wt.as_ptr())
+        // Clone wavetable for waveguide mode (avoids borrow conflict with voices)
+        let wg_data = if self.params.source_mode == 2 {
+            let wt = self.get_wavetable(self.params.wg_excitation, self.params.wg_body);
+            if !wt.is_empty() { Some(wt.to_vec()) } else { None }
         } else {
             None
         };
-        let wg_len = if wg_wavetable.is_some() { wt.len() } else { 0 };
 
         if self.params.assign_mode == 2 {
             for (i, voice) in self.voices.iter_mut().enumerate() {
-                // Load wavetable BEFORE note_on (which calls trigger)
-                if let Some(ptr) = wg_wavetable {
-                    let data = unsafe { core::slice::from_raw_parts(ptr, wg_len) };
+                if let Some(ref data) = wg_data {
                     voice.waveguide.set_wavetable(data);
                 }
                 voice.note_on(note, velocity, &self.params);
@@ -107,9 +104,7 @@ impl Engine {
             }
         } else {
             let idx = self.voice_allocator.note_on(note);
-            // Load wavetable BEFORE note_on (which calls trigger)
-            if let Some(ptr) = wg_wavetable {
-                let data = unsafe { core::slice::from_raw_parts(ptr, wg_len) };
+            if let Some(ref data) = wg_data {
                 self.voices[idx].waveguide.set_wavetable(data);
             }
             self.voices[idx].note_on(note, velocity, &self.params);

@@ -7,6 +7,16 @@ export function apply_params_from_buf(id: number): void;
 
 export function create_engine(id: number, sample_rate: number): void;
 
+/**
+ * Diagnostic: return the length of a stored wavetable.
+ */
+export function debug_wavetable_len(id: number, exc_idx: number, body_idx: number): number;
+
+/**
+ * Diagnostic: return the peak value of a stored wavetable.
+ */
+export function debug_wavetable_peak(id: number, exc_idx: number, body_idx: number): number;
+
 export function destroy_engine(id: number): void;
 
 export function get_active_voice_count(id: number): number;
@@ -42,6 +52,8 @@ export interface InitOutput {
     readonly all_notes_off: (a: number) => void;
     readonly apply_params_from_buf: (a: number) => void;
     readonly create_engine: (a: number, b: number) => void;
+    readonly debug_wavetable_len: (a: number, b: number, c: number) => number;
+    readonly debug_wavetable_peak: (a: number, b: number, c: number) => number;
     readonly destroy_engine: (a: number) => void;
     readonly get_active_voice_count: (a: number) => number;
     readonly get_output_len: () => number;
