@@ -13,12 +13,14 @@ use crate::envelope::Envelope;
 use crate::filter::{HighPass, IR3109};
 use crate::oscillator::{NoiseGen, Oscillator};
 use crate::params::EngineParams;
+use crate::waveguide::Waveguide;
 
 pub struct Voice {
     pub vco1: Oscillator,
     pub vco2: Oscillator,
     pub noise: NoiseGen,
     pub bubble: BubbleOscillator,
+    pub waveguide: Waveguide,
     pub filter: IR3109,
     pub hpf: HighPass,
     pub env1: Envelope,     // → filter cutoff (optionally VCA)
@@ -39,6 +41,7 @@ impl Voice {
             vco2: Oscillator::new(),
             noise: NoiseGen::new(42 + voice_index as u32 * 7),
             bubble: BubbleOscillator::new(sample_rate),
+            waveguide: Waveguide::new(sample_rate),
             filter: IR3109::new(sample_rate),
             hpf: HighPass::new(sample_rate),
             env1: Envelope::new(sample_rate),
@@ -83,6 +86,13 @@ impl Voice {
         self.filter.reset();
         self.hpf.reset();
 
+        // Waveguide source: set pitch and excite
+        if params.source_mode == 2 {
+            self.waveguide.set_pitch(freq);
+            self.waveguide.set_params(params.wg_body, params.wg_brightness, params.wg_body_mix);
+            self.waveguide.excite(params.wg_excitation, self.velocity);
+        }
+
         // Trigger note-based bubbles if enabled
         if params.bubble_enable > 0 && params.bubble_level > 0.0 {
             self.bubble.set_params(params.bubble_rate, params.bubble_min_size, params.bubble_max_size);
@@ -118,31 +128,9 @@ impl Voice {
         }
         let lfo = global_lfo * self.lfo_delay_level;
 
-        // LFO + Chaos → PWM modulation
-        let pwm_mod = lfo * params.lfo_pwm_depth * 0.4
-            + chaos_out * params.chaos_to_pwm * 0.4;
-        self.vco1.pulse_width = (params.vco1_pw + pwm_mod).clamp(0.05, 0.95);
-        self.vco2.pulse_width = (params.vco2_pw + pwm_mod).clamp(0.05, 0.95);
-
-        // LFO + Chaos → pitch
+        // LFO + Chaos → pitch modulation
         let pitch_mod = lfo * params.lfo_pitch_depth
             + chaos_out * params.chaos_to_pitch;
-
-        // VCO2 first (needed for cross-mod into VCO1)
-        let base_freq2 = self.vco2.target_freq;
-        self.vco2.target_freq = base_freq2 * (1.0 + pitch_mod * 0.1);
-        let vco2_out = self.vco2.tick(inv_sr, params.vco2_wave_flags);
-        self.vco2.target_freq = base_freq2;
-
-        // VCO1 with cross-mod FROM VCO2 (correct JP-8 direction: VCO2→VCO1)
-        let xmod = params.cross_mod * vco2_out;
-        let base_freq1 = self.vco1.target_freq;
-        self.vco1.target_freq = base_freq1 * (1.0 + pitch_mod * 0.1);
-        let vco1_out = self.vco1.tick_with_fm(inv_sr, params.vco1_wave_flags, xmod * inv_sr);
-        self.vco1.target_freq = base_freq1;
-
-        // Sub-oscillator (VCO1, one octave below, square)
-        let sub_out = self.vco1.sub_oscillator() * params.sub_osc_level;
 
         // Bubble oscillator (ticks continuously for ambient, plus note-triggered)
         let bubble_out = if params.bubble_enable > 0 && params.bubble_level > 0.0 {
@@ -151,13 +139,43 @@ impl Voice {
             0.0
         };
 
-        // Mixer
         let noise_out = self.noise.next();
-        let mix = vco1_out * params.vco1_level
-            + vco2_out * params.vco2_level
-            + sub_out
-            + noise_out * params.noise_level
-            + bubble_out;
+
+        // Source dispatch: BLEP oscillators or waveguide
+        let mix = if params.source_mode == 2 {
+            // Waveguide source — replaces VCO1+VCO2
+            let wg_out = self.waveguide.tick();
+            wg_out + noise_out * params.noise_level + bubble_out
+        } else {
+            // BLEP oscillators (default, source_mode == 0)
+            // LFO + Chaos → PWM modulation
+            let pwm_mod = lfo * params.lfo_pwm_depth * 0.4
+                + chaos_out * params.chaos_to_pwm * 0.4;
+            self.vco1.pulse_width = (params.vco1_pw + pwm_mod).clamp(0.05, 0.95);
+            self.vco2.pulse_width = (params.vco2_pw + pwm_mod).clamp(0.05, 0.95);
+
+            // VCO2 first (needed for cross-mod into VCO1)
+            let base_freq2 = self.vco2.target_freq;
+            self.vco2.target_freq = base_freq2 * (1.0 + pitch_mod * 0.1);
+            let vco2_out = self.vco2.tick(inv_sr, params.vco2_wave_flags);
+            self.vco2.target_freq = base_freq2;
+
+            // VCO1 with cross-mod FROM VCO2
+            let xmod = params.cross_mod * vco2_out;
+            let base_freq1 = self.vco1.target_freq;
+            self.vco1.target_freq = base_freq1 * (1.0 + pitch_mod * 0.1);
+            let vco1_out = self.vco1.tick_with_fm(inv_sr, params.vco1_wave_flags, xmod * inv_sr);
+            self.vco1.target_freq = base_freq1;
+
+            // Sub-oscillator
+            let sub_out = self.vco1.sub_oscillator() * params.sub_osc_level;
+
+            vco1_out * params.vco1_level
+                + vco2_out * params.vco2_level
+                + sub_out
+                + noise_out * params.noise_level
+                + bubble_out
+        };
 
         // ENV-1 → filter cutoff modulation
         let env1_out = self.env1.tick();
