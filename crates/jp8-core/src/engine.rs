@@ -96,11 +96,12 @@ impl Engine {
 
         if self.params.assign_mode == 2 {
             for (i, voice) in self.voices.iter_mut().enumerate() {
-                voice.note_on(note, velocity, &self.params);
+                // Load wavetable BEFORE note_on (which calls trigger)
                 if let Some(ptr) = wg_wavetable {
                     let data = unsafe { core::slice::from_raw_parts(ptr, wg_len) };
                     voice.waveguide.set_wavetable(data);
                 }
+                voice.note_on(note, velocity, &self.params);
                 let detune = (i as f32 - 3.5) * self.voice_allocator.unison_detune * 0.1;
                 let factor = 2.0f32.powf(detune / 12.0);
                 voice.vco1.target_freq *= factor;
@@ -111,11 +112,12 @@ impl Engine {
             }
         } else {
             let idx = self.voice_allocator.note_on(note);
-            self.voices[idx].note_on(note, velocity, &self.params);
+            // Load wavetable BEFORE note_on (which calls trigger)
             if let Some(ptr) = wg_wavetable {
                 let data = unsafe { core::slice::from_raw_parts(ptr, wg_len) };
                 self.voices[idx].waveguide.set_wavetable(data);
             }
+            self.voices[idx].note_on(note, velocity, &self.params);
         }
     }
 
