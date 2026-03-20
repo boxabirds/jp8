@@ -75,14 +75,10 @@ impl Waveguide {
         let coeff = (brightness + bright_offset).clamp(0.0, 1.0);
         self.loop_coeff = 0.3 + coeff * 0.65; // range [0.3, 0.95]
 
-        // Per-sample decay: must account for the fact that at 440Hz the signal
-        // passes through the loop 441 times/sec (44100/100 samples per loop).
-        // We want 1-5 second audible sustain.
-        // decay^(SR) = target_level after sustain_seconds.
-        // So decay = target^(1/(SR * sustain_seconds))
-        let effective_damping = damping * body_mix + (1.0 - body_mix) * 0.02;
-        let sustain_secs = 4.0 - effective_damping * 3.0; // 1-4 seconds
-        self.decay = (-6.908 / (self.sample_rate * sustain_secs)).exp();
+        // Minimal per-sample energy loss — the loop filter handles timbral decay
+        // (highs die first), ENV-2 handles amplitude. This just prevents DC buildup.
+        let effective_damping = damping * body_mix + (1.0 - body_mix) * 0.01;
+        self.decay = 1.0 - effective_damping * 0.00002; // very close to 1.0
     }
 
     /// Excite the waveguide (called on note_on).
